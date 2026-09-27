@@ -26,7 +26,7 @@ export function RealtimeClock() {
         if (!mounted) return;
 
         const updateTime = () => {
-            setTime(moment().tz(timezone).format("HH:mm:ss"));
+            setTime(moment().tz(timezone).format("hh:mm:ss A"));
         };
 
         updateTime();
