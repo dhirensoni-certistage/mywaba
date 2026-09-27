@@ -6,7 +6,7 @@ import { Clock } from "lucide-react";
 
 export function RealtimeClock() {
     const [time, setTime] = useState("");
-    const [timezone, setTimezone] = useState("Asia/Jakarta");
+    const [timezone, setTimezone] = useState("Asia/Kolkata");
     const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
@@ -20,6 +20,15 @@ export function RealtimeClock() {
                 }
             })
             .catch(() => { });
+
+        const handleSettingsUpdate = (e: any) => {
+            if (e.detail?.timezone) {
+                setTimezone(e.detail.timezone);
+            }
+        };
+
+        window.addEventListener("system-settings-updated", handleSettingsUpdate);
+        return () => window.removeEventListener("system-settings-updated", handleSettingsUpdate);
     }, []);
 
     useEffect(() => {

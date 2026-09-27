@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { RefreshCw, Save, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
+    const router = useRouter();
     const { data: authSession } = useSession();
     const isSuperAdmin = (authSession?.user as any)?.role === "SUPERADMIN";
 
@@ -66,7 +68,14 @@ export default function SettingsPage() {
             });
 
             if (res.ok) {
-                toast.success("System settings updated. Refresh to see changes.");
+                toast.success("System settings updated successfully!");
+                if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("system-settings-updated", { detail: systemConfig }));
+                }
+                if (typeof document !== "undefined" && systemConfig.appName) {
+                    document.title = `${systemConfig.appName} | Premium WhatsApp Gateway`;
+                }
+                router.refresh();
             } else {
                 toast.error("Failed to update system settings");
             }
