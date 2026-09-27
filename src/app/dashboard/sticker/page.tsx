@@ -87,7 +87,7 @@ export default function StickerPage() {
                             <div className="space-y-2">
                                 <Label>Target Number</Label>
                                 <Input
-                                    placeholder="628123456789"
+                                    placeholder="919876543210"
                                     value={target}
                                     onChange={e => setTarget(e.target.value)}
                                 />

@@ -438,7 +438,7 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
                     <div className="p-2.5 bg-muted/30 rounded-lg space-y-2 border border-border/40">
                         <Label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Phone Number</Label>
                         <div className="flex gap-1.5">
-                            <Input placeholder="628123456789" value={newChatNumber}
+                            <Input placeholder="919876543210" value={newChatNumber}
                                 onChange={(e) => setNewChatNumber(e.target.value)}
                                 onKeyDown={(e) => e.key === "Enter" && handleStartNewChat()}
                                 className="h-8 text-sm" />

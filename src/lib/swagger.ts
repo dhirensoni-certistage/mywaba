@@ -22,7 +22,7 @@ All endpoints require authentication via:
 ## 📋 Common Parameters
 - **sessionId**: Unique session identifier (e.g., "mysession-01")
 - **jid**: WhatsApp JID format:
-  - Personal: \`628123456789@s.whatsapp.net\`
+  - Personal: \`919876543210@s.whatsapp.net\`
   - Group: \`120363123456789@g.us\`
 
 ## 📊 Rate Limits
@@ -104,7 +104,7 @@ All endpoints require authentication via:
                     Contact: {
                         type: "object",
                         properties: {
-                            jid: { type: "string", example: "628123456789@s.whatsapp.net" },
+                            jid: { type: "string", example: "919876543210@s.whatsapp.net" },
                             name: { type: "string", example: "John Doe" },
                             notify: { type: "string" },
                             profilePic: { type: "string", nullable: true }
@@ -600,9 +600,9 @@ All endpoints require authentication via:
                                     example: {
                                         enabled: true,
                                         botMode: "BLACKLIST",
-                                        botBlockedJids: ["628123456789@s.whatsapp.net"],
+                                        botBlockedJids: ["919876543210@s.whatsapp.net"],
                                         autoReplyMode: "SPECIFIC",
-                                        autoReplyAllowedJids: ["628123456789@s.whatsapp.net"],
+                                        autoReplyAllowedJids: ["919876543210@s.whatsapp.net"],
                                         botName: "My Assistant",
                                         enableSticker: true
                                     }
@@ -917,7 +917,7 @@ All endpoints require authentication via:
                                 required: true,
                                 schema: { type: "string" },
                                 description: "Recipient JID",
-                                example: "628123456789@s.whatsapp.net"
+                                example: "919876543210@s.whatsapp.net"
                             }
                         ],
                         requestBody: {
@@ -970,7 +970,7 @@ All endpoints require authentication via:
                                             mentions: {
                                                 type: "array",
                                                 items: { type: "string" },
-                                                example: ["628123456789@s.whatsapp.net"],
+                                                example: ["919876543210@s.whatsapp.net"],
                                                 description: "List of JIDs to mention (for group messages)"
                                             }
                                         }
@@ -979,14 +979,14 @@ All endpoints require authentication via:
                                         text: {
                                             summary: "Text message",
                                             value: {
-                                                jid: "628123456789@s.whatsapp.net",
+                                                jid: "919876543210@s.whatsapp.net",
                                                 message: { text: "Hello, how can I help you?" }
                                             }
                                         },
                                         image: {
                                             summary: "Image with caption",
                                             value: {
-                                                jid: "628123456789@s.whatsapp.net",
+                                                jid: "919876543210@s.whatsapp.net",
                                                 message: {
                                                     image: { url: "https://example.com/product.jpg" },
                                                     caption: "New product available!"
@@ -996,7 +996,7 @@ All endpoints require authentication via:
                                         sticker: {
                                             summary: "Sticker from URL",
                                             value: {
-                                                jid: "628123456789@s.whatsapp.net",
+                                                jid: "919876543210@s.whatsapp.net",
                                                 message: {
                                                     sticker: {
                                                         url: "https://example.com/sticker.webp",
@@ -1010,8 +1010,8 @@ All endpoints require authentication via:
                                             summary: "Message with Mention",
                                             value: {
                                                 jid: "120363123456789@g.us",
-                                                message: { text: "Hello @628123456789, welcome!" },
-                                                mentions: ["628123456789@s.whatsapp.net"]
+                                                message: { text: "Hello @919876543210, welcome!" },
+                                                mentions: ["919876543210@s.whatsapp.net"]
                                             }
                                         }
                                     }
@@ -1029,7 +1029,7 @@ All endpoints require authentication via:
                                             message: "Message sent successfully",
                                             data: {
                                                 key: {
-                                                    remoteJid: "628123456789@s.whatsapp.net",
+                                                    remoteJid: "919876543210@s.whatsapp.net",
                                                     fromMe: true,
                                                     id: "3EB01234567890"
                                                 },
@@ -1129,7 +1129,7 @@ All endpoints require authentication via:
                                             recipients: {
                                                 type: "array",
                                                 items: { type: "string" },
-                                                example: ["628123456789@s.whatsapp.net", "628987654321@s.whatsapp.net"]
+                                                example: ["919876543210@s.whatsapp.net", "919876543211@s.whatsapp.net"]
                                             },
                                             message: { type: "string", example: "Flash Sale! 50% off" },
                                             delay: { type: "number", description: "Optional delay (unused)" }
@@ -1427,7 +1427,7 @@ All endpoints require authentication via:
                         description: "Send a quoted reply to a specific message by its ID. Uses same request format as /send — pass a Baileys message object.",
                         parameters: [
                             { name: "sessionId", in: "path", required: true, schema: { type: "string" }, example: "sales-01" },
-                            { name: "jid", in: "path", required: true, schema: { type: "string" }, example: "628123456789@s.whatsapp.net" },
+                            { name: "jid", in: "path", required: true, schema: { type: "string" }, example: "919876543210@s.whatsapp.net" },
                             { name: "messageId", in: "path", required: true, schema: { type: "string" }, description: "ID of message to reply to", example: "3EB0ABCD1234567890" }
                         ],
                         requestBody: {
@@ -1443,7 +1443,7 @@ All endpoints require authentication via:
                                                 description: "Message content — same format as /send (text, image, video, etc.)",
                                                 example: { text: "Thanks for your message!" }
                                             },
-                                            mentions: { type: "array", items: { type: "string" }, example: ["628123456789@s.whatsapp.net"], description: "JIDs to mention" },
+                                            mentions: { type: "array", items: { type: "string" }, example: ["919876543210@s.whatsapp.net"], description: "JIDs to mention" },
                                             fromMe: { type: "boolean", default: false, description: "Whether the quoted message was sent by you" }
                                         }
                                     },
@@ -1491,7 +1491,7 @@ All endpoints require authentication via:
                         description: "Send a quoted reply with messageId provided in the request body. Same request format as /send with added messageId.",
                         parameters: [
                             { name: "sessionId", in: "path", required: true, schema: { type: "string" }, example: "sales-01" },
-                            { name: "jid", in: "path", required: true, schema: { type: "string" }, example: "628123456789@s.whatsapp.net" }
+                            { name: "jid", in: "path", required: true, schema: { type: "string" }, example: "919876543210@s.whatsapp.net" }
                         ],
                         requestBody: {
                             required: true,
@@ -1590,7 +1590,7 @@ All endpoints require authentication via:
                         parameters: [
                             { name: "sessionId", in: "path", required: true, schema: { type: "string" }, example: "sales-01" },
                             { name: "q", in: "query", schema: { type: "string" }, example: "invoice", description: "Text to search for in message content" },
-                            { name: "jid", in: "query", schema: { type: "string" }, example: "628123456789@s.whatsapp.net", description: "Filter by chat JID" },
+                            { name: "jid", in: "query", schema: { type: "string" }, example: "919876543210@s.whatsapp.net", description: "Filter by chat JID" },
                             { name: "type", in: "query", schema: { type: "string", enum: ["TEXT", "IMAGE", "VIDEO", "AUDIO", "DOCUMENT", "STICKER", "LOCATION", "CONTACT"] }, description: "Filter by message type" },
                             { name: "fromMe", in: "query", schema: { type: "boolean" }, description: "Filter by sender (true=outgoing, false=incoming)" },
                             { name: "page", in: "query", schema: { type: "integer", default: 1, minimum: 1 } },
@@ -1765,13 +1765,13 @@ All endpoints require authentication via:
                                         type: "object",
                                         required: ["fromJid", "messageId", "toJids"],
                                         properties: {
-                                            fromJid: { type: "string", description: "Source chat JID", example: "628123456789@s.whatsapp.net" },
+                                            fromJid: { type: "string", description: "Source chat JID", example: "919876543210@s.whatsapp.net" },
                                             messageId: { type: "string", example: "3EB0ABCD1234567890" },
                                             toJids: {
                                                 type: "array",
                                                 items: { type: "string" },
                                                 description: "Recipient JIDs",
-                                                example: ["628987654321@s.whatsapp.net"]
+                                                example: ["919876543211@s.whatsapp.net"]
                                             }
                                         }
                                     }
@@ -2125,7 +2125,7 @@ All endpoints require authentication via:
                                             type: "object",
                                             properties: {
                                                 success: { type: "boolean", example: true },
-                                                message: { type: "string", example: "Presence 'composing' sent to 628123456789@s.whatsapp.net" }
+                                                message: { type: "string", example: "Presence 'composing' sent to 919876543210@s.whatsapp.net" }
                                             }
                                         }
                                     }
@@ -2158,7 +2158,7 @@ All endpoints require authentication via:
                                             type: "object",
                                             properties: {
                                                 success: { type: "boolean", example: true },
-                                                jid: { type: "string", example: "628123456789@s.whatsapp.net" },
+                                                jid: { type: "string", example: "919876543210@s.whatsapp.net" },
                                                 profilePicUrl: { type: "string", nullable: true, example: "https://pps.whatsapp.net/..." },
                                                 message: { type: "string", example: "No profile picture found" }
                                             }
@@ -2193,7 +2193,7 @@ All endpoints require authentication via:
                                                 type: "array",
                                                 items: { type: "string" },
                                                 maxItems: 50,
-                                                example: ["628123456789", "628987654321"]
+                                                example: ["919876543210", "919876543211"]
                                             }
                                         }
                                     }
@@ -2273,7 +2273,7 @@ All endpoints require authentication via:
                                             participants: {
                                                 type: "array",
                                                 items: { type: "string" },
-                                                example: ["628123456789@s.whatsapp.net"]
+                                                example: ["919876543210@s.whatsapp.net"]
                                             }
                                         }
                                     }
@@ -2845,7 +2845,7 @@ All endpoints require authentication via:
                                         }
                                     },
                                     example: {
-                                        jid: "628123456789@s.whatsapp.net",
+                                        jid: "919876543210@s.whatsapp.net",
                                         content: "Reminder: Meeting in 10 mins",
                                         sendAt: "2024-12-25T10:00:00.000Z",
                                         mediaUrl: "https://example.com/image.jpg",
@@ -2919,7 +2919,7 @@ All endpoints require authentication via:
                                         }
                                     },
                                     example: {
-                                        jid: "628123456789@s.whatsapp.net",
+                                        jid: "919876543210@s.whatsapp.net",
                                         content: "Updated meeting reminder",
                                         sendAt: "2024-12-25T11:00:00.000Z",
                                         mediaUrl: "https://example.com/image.jpg",
@@ -4288,10 +4288,10 @@ All endpoints require authentication via:
                                             summary: "Status with Mention",
                                             value: {
                                                 sessionId: "sales-01",
-                                                content: "Check this out @628123456789",
+                                                content: "Check this out @919876543210",
                                                 type: "TEXT",
                                                 backgroundColor: 4278190080,
-                                                mentions: ["628123456789@s.whatsapp.net"]
+                                                mentions: ["919876543210@s.whatsapp.net"]
                                             }
                                         },
                                         image: {

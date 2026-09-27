@@ -513,7 +513,7 @@ export default function SchedulerPage() {
                                         </div>
                                     </RadioGroup>
                                 </div>
-                                <Input value={newJid} onChange={e => setNewJid(e.target.value)} placeholder={newJidType === 'group' ? "120363... (Group ID)" : newJidType === 'newsletter' ? "120363... (Channel ID)" : "62812345678"} />
+                                <Input value={newJid} onChange={e => setNewJid(e.target.value)} placeholder={newJidType === 'group' ? "120363... (Group ID)" : newJidType === 'newsletter' ? "120363... (Channel ID)" : "919876543210"} />
                             </div>
                             
                             {renderRecurrenceForm(
@@ -660,7 +660,7 @@ export default function SchedulerPage() {
                                         </div>
                                     </RadioGroup>
                                 </div>
-                                <Input value={editJid} onChange={e => setEditJid(e.target.value)} placeholder={editJidType === 'group' ? "120363... (Group ID)" : editJidType === 'newsletter' ? "120363... (Channel ID)" : "62812345678"} />
+                                <Input value={editJid} onChange={e => setEditJid(e.target.value)} placeholder={editJidType === 'group' ? "120363... (Group ID)" : editJidType === 'newsletter' ? "120363... (Channel ID)" : "919876543210"} />
                             </div>
                             
                             {renderRecurrenceForm(

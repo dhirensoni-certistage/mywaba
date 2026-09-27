@@ -311,7 +311,7 @@ export default function SessionDetailPage() {
                                         <div className="flex flex-col w-full max-w-sm gap-2 mt-1">
                                             <div className="flex gap-2">
                                                 <Input
-                                                    placeholder="628123456789"
+                                                    placeholder="919876543210"
                                                     value={phoneNumber}
                                                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPhoneNumber(e.target.value)}
                                                     className="font-mono"
@@ -320,7 +320,7 @@ export default function SessionDetailPage() {
                                                     Link
                                                 </Button>
                                             </div>
-                                            <p className="text-[10px] text-muted-foreground text-center">Use country code without + or spaces (e.g., 628123456789)</p>
+                                            <p className="text-[10px] text-muted-foreground text-center">Use country code without + or spaces (e.g., 919876543210)</p>
                                         </div>
                                         {pairingCode && (
                                             <div className="mt-4 p-4 bg-slate-900 rounded-lg w-full max-w-[320px] text-center border-2 border-slate-700 shadow-xl relative group/code">

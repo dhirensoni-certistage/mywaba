@@ -238,9 +238,9 @@ export default function BroadcastPage() {
                                 </CardHeader>
                                 <CardContent className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label>Target Numbers (e.g., 628123456789)</Label>
+                                        <Label>Target Numbers (e.g., 919876543210)</Label>
                                         <Textarea
-                                            placeholder={"628123456789\n628987654321"}
+                                            placeholder={"919876543210\n919876543211"}
                                             className="min-h-[200px] font-mono text-sm"
                                             value={contacts}
                                             onChange={e => setContacts(e.target.value)}

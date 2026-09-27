@@ -241,7 +241,7 @@ export default function BotSettingsPage() {
                                     </Label>
                                     <div className="flex gap-2">
                                         <Input
-                                            placeholder="628123456789@s.whatsapp.net"
+                                            placeholder="919876543210@s.whatsapp.net"
                                             value={newJid}
                                             onChange={(e) => setNewJid(e.target.value)}
                                             onKeyDown={(e) => e.key === 'Enter' && addJid(botConfig.botMode === 'SPECIFIC' ? 'botAllowedJids' : 'botBlockedJids')}
