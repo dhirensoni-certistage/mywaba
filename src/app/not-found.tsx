@@ -39,10 +39,10 @@ export default function NotFound() {
             404
           </h1>
           <h2 className="text-xl font-bold text-foreground mb-4" suppressHydrationWarning>
-            Halaman Tidak Ditemukan
+            Page Not Found
           </h2>
           <p className="text-sm text-muted-foreground leading-relaxed max-w-sm mx-auto" suppressHydrationWarning>
-            Maaf, halaman yang Anda cari mungkin telah dihapus, dipindahkan, atau memang tidak pernah ada.
+            Sorry, the page you are looking for might have been removed, had its name changed, or is temporarily unavailable.
           </p>
         </div>
 
@@ -54,7 +54,7 @@ export default function NotFound() {
             className="w-full flex-1 flex items-center justify-center gap-2 h-12 border-primary/20 hover:bg-primary/10 text-primary hover:text-primary rounded-xl transition-all shadow-sm"
           >
             <ArrowLeft className="size-4" />
-            <span>Kembali</span>
+            <span>Go Back</span>
           </Button>
           <Button
             asChild
@@ -63,7 +63,7 @@ export default function NotFound() {
           >
             <Link href="/dashboard">
               <Home className="size-4" />
-              <span>Beranda</span>
+              <span>Dashboard</span>
             </Link>
           </Button>
         </div>

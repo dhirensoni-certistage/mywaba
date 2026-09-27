@@ -29,10 +29,10 @@ export default function GlobalError({
               Fatal Error
             </h1>
             <h2 className="text-xl font-bold text-foreground mb-4" suppressHydrationWarning>
-              Sistem Mengalami Kendala Kritis
+              Critical System Error
             </h2>
             <p className="text-sm text-muted-foreground leading-relaxed max-w-sm mx-auto" suppressHydrationWarning>
-              Aplikasi mengalami kesalahan pada konfigurasi dasar. Silakan muat ulang sistem.
+              The application encountered a critical system error. Please reload the application.
             </p>
           </div>
 
@@ -43,7 +43,7 @@ export default function GlobalError({
               className="w-full flex-1 flex items-center justify-center gap-2 h-12 bg-destructive hover:bg-destructive/90 text-destructive-foreground font-medium rounded-xl transition-all shadow-lg shadow-destructive/20 active:scale-95 duration-150"
             >
               <RotateCcw className="size-4" />
-              <span>Muat Ulang Aplikasi</span>
+              <span>Reload Application</span>
             </button>
           </div>
 

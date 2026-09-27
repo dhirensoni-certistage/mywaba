@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 const APP_DESCRIPTION = "Self-hosted WhatsApp Gateway with Multi-device support, Auto-replies, API integration, and session management dashboard.";
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://wa-akg.app";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://waba.certistage.com";
 
 export const viewport: Viewport = {
   themeColor: [
@@ -28,7 +28,7 @@ export const viewport: Viewport = {
 };
 
 export async function generateMetadata(): Promise<Metadata> {
-  let appName = "WA-AKG";
+  let appName = process.env.APP_NAME || "WABA";
   try {
     // @ts-ignore
     const config = await prisma.systemConfig.findUnique({ where: { id: "default" } });

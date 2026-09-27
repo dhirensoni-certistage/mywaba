@@ -45,10 +45,10 @@ export default function ErrorPage({
             Error 500
           </h1>
           <h2 className="text-xl font-bold text-foreground mb-4" suppressHydrationWarning>
-            Sistem Mengalami Kendala
+            Something Went Wrong
           </h2>
           <p className="text-sm text-muted-foreground leading-relaxed max-w-sm mx-auto" suppressHydrationWarning>
-            Maaf, terjadi kesalahan tak terduga pada aplikasi. Tim kami telah diberitahu mengenai masalah ini.
+            An unexpected error occurred in the application. Please try again or return to the dashboard.
           </p>
         </div>
 
@@ -60,7 +60,7 @@ export default function ErrorPage({
             className="w-full flex-1 flex items-center justify-center gap-2 h-12 border-destructive/20 hover:bg-destructive/10 text-destructive hover:text-destructive rounded-xl transition-all shadow-sm"
           >
             <RotateCcw className="size-4" />
-            <span>Coba Lagi</span>
+            <span>Try Again</span>
           </Button>
           <Button
             asChild
@@ -81,7 +81,7 @@ export default function ErrorPage({
             className="flex items-center justify-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors mx-auto w-full py-2"
           >
             {showDetails ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-            <span>{showDetails ? 'Sembunyikan detail teknis' : 'Lihat detail teknis'}</span>
+            <span>{showDetails ? 'Hide technical details' : 'Show technical details'}</span>
           </button>
 
           {showDetails && (

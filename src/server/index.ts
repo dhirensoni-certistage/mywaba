@@ -62,42 +62,6 @@ app.prepare().then(() => {
   server.headersTimeout = 120 * 1000; // 120 seconds
 
   server.listen(port, () => {
-    logger.banner(pkg.name.toUpperCase(), pkg.version, port);
-
-    // --- WA-AKG Monitor Heartbeat ---
-    // Sends a ping every 30 seconds to the monitoring server
-    // Hanya untuk dokumentasi ada berapa layanan WA-AKG yang aktif. 
-    // Hanya untuk memantau tidak bermaksud lain. Semakin banyak WA-AKG yang aktif = semakin semangat saya mengembangkan WA-AKG ini.
-    // Terima kasih telah menggunakan WA-AKG.
-    const MONITOR_URL = "https://api-wa-akg.aikeigroup.net/api/ping";
-    const APP_URL = process.env.BASE_URL || `http://${hostname}:${port}`; // Kamu bisa mengganti ini untuk keamanan WA-AKG kamu. Tapi jangan menghapus semua Heartbeat nya. Terima Kasih.
-    const APP_NAME = process.env.APP_NAME || "WA-AKG";
-
-    const sendHeartbeat = async () => {
-      try {
-        await fetch(MONITOR_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            appUrl: APP_URL,
-            appName: APP_NAME,
-            isBackend: true,
-            systemInfo: {
-              platform: process.platform,
-              nodeVersion: process.version,
-              memoryUsage: Math.round(process.memoryUsage().rss / 1024 / 1024) + "MB"
-            }
-          }),
-        });
-      } catch (error) {
-        // Silently fail to not disturb the main application
-      }
-    };
-
-    // Initial ping
-    sendHeartbeat();
-    // Interval ping
-    setInterval(sendHeartbeat, 30000);
-    // --------------------------------
+    logger.banner((process.env.APP_NAME || "WABA").toUpperCase(), pkg.version, port);
   });
 });
