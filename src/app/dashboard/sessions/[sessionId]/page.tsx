@@ -110,7 +110,9 @@ export default function SessionDetailPage() {
 
             // Re-fetch full details on major status change (like connection) to get 'me' info
             if (data.status === 'CONNECTED') {
+                toast.success("WhatsApp Connected Successfully! 🎉");
                 fetchSession();
+                router.refresh();
             }
         });
 
@@ -125,10 +127,37 @@ export default function SessionDetailPage() {
         fetchMetrics();
         const metricsInterval = setInterval(fetchMetrics, 3000);
 
+        // Polling fallback: check session status every 3 seconds to guarantee instant UI update even without socket
+        const statusPollInterval = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/sessions/${sessionId}`);
+                if (res.ok) {
+                    const result = await res.json();
+                    const liveData = result?.data;
+                    if (liveData) {
+                        setSession(prev => {
+                            if (prev && prev.status !== liveData.status) {
+                                if (liveData.status === "CONNECTED") {
+                                    toast.success("WhatsApp Connected Successfully! 🎉");
+                                    router.refresh();
+                                }
+                                return { ...prev, ...liveData };
+                            }
+                            return prev;
+                        });
+                        if (liveData.qr) setQrCode(liveData.qr);
+                    }
+                }
+            } catch (e) {
+                // silent
+            }
+        }, 3000);
+
         return () => {
             socketInstance.disconnect();
             clearInterval(interval);
             clearInterval(metricsInterval);
+            clearInterval(statusPollInterval);
         };
     }, [sessionId]);
 

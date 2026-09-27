@@ -54,7 +54,6 @@ export function SessionManager({ user }: { user: any }) {
         });
 
         socketInstance.on('connection.update', (data: { sessionId: string, status: string, qr: string }) => {
-            // Update specific session status if match
             setSessions(prev => prev.map(s => {
                 if (s.sessionId === data.sessionId) {
                     return { ...s, status: data.status, qr: data.qr };
@@ -63,7 +62,8 @@ export function SessionManager({ user }: { user: any }) {
             }));
 
             if (data.status === 'CONNECTED') {
-                fetchSessions(); // Refresh purely to get updated state from DB if needed
+                toast.success("WhatsApp Connected Successfully! 🎉");
+                fetchSessions();
             }
         });
 
@@ -82,7 +82,7 @@ export function SessionManager({ user }: { user: any }) {
     }
 
     const createSession = async () => {
-        if (!newSessionName) {
+        if (!newSessionName.trim()) {
             toast.error("Session name is required");
             return;
         }
@@ -100,22 +100,23 @@ export function SessionManager({ user }: { user: any }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     userId: user.id,
-                    name: newSessionName,
-                    sessionId: newSessionId || undefined // Optional, backend will generate if empty
+                    name: newSessionName.trim(),
+                    sessionId: newSessionId.trim() || undefined
                 })
             });
             const responseData = await res.json();
             const session = responseData?.data;
 
-            if (!res.ok || !session) throw new Error(responseData.error || responseData.message || "Failed to create");
+            if (!res.ok || !session) throw new Error(responseData.error || responseData.message || "Failed to create session");
 
             setSessions([...sessions, session]);
             setNewSessionName("");
             setNewSessionId("");
-            toast.success("Session created successfully");
+            toast.success("Session created! Starting WhatsApp instance...");
 
-            // Optionally redirect immediately or let user choose
-            // router.push(`/dashboard/sessions/${session.sessionId}`);
+            // Automatically start session and take user directly to QR scan page
+            await fetch(`/api/sessions/${session.sessionId}/start`, { method: 'POST' }).catch(() => {});
+            router.push(`/dashboard/sessions/${session.sessionId}`);
         } catch (e: any) {
             console.error(e);
             toast.error(e.message || "Failed to create session");

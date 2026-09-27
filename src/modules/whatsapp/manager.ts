@@ -118,7 +118,9 @@ export class WhatsAppManager {
         if (instance) {
             await instance.shutdown();
             instance.status = "STOPPED";
-            this.io?.to(sessionId).emit("connection.update", { status: "STOPPED", qr: null });
+            const payload = { sessionId, status: "STOPPED", qr: null };
+            this.io?.emit("connection.update", payload);
+            this.io?.to(sessionId).emit("connection.update", payload);
             await prisma.session.update({
                 where: { sessionId },
                 data: { status: "STOPPED" }

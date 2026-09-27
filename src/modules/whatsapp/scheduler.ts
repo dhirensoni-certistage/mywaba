@@ -25,7 +25,11 @@ const checkScheduledMessages = async () => {
                 try {
                     let content: any = {};
                     if (msg.mediaUrl) {
-                        const url = msg.mediaUrl;
+                        let url = msg.mediaUrl;
+                        if (url.startsWith("/")) {
+                            const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3030}`;
+                            url = `${baseUrl.replace(/\/$/, "")}${url}`;
+                        }
                         const type = msg.mediaType || 'image'; // Default to image if null
 
                         const res = await fetch(url);

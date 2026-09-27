@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { getCookie, setCookie } from "@/lib/client-cookie";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { io } from "socket.io-client";
 
 interface Session {
     id: string;
@@ -34,9 +35,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             if (res.ok) {
                 const responseData = await res.json();
                 const data = responseData?.data || [];
-                // Filter connected only? Or showing all but disabled?
-                // Logic: Only show CONNECTED in selector for "Active" operations.
-                // Show all sessions so users can manage disconnected ones (e.g. webhooks, settings)
                 setSessions(data);
 
                 // Sync with cookie
@@ -44,7 +42,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 if (cookieId && data.find((s: Session) => s.sessionId === cookieId)) {
                     setSessionIdState(cookieId);
                 } else if (data.length > 0) {
-                    // Default to first
                     const first = data[0].sessionId;
                     setSessionIdState(first);
                     setCookie("sessionId", first);
@@ -62,6 +59,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         fetchSessions();
+
+        const socketInstance = io({
+            path: "/api/socket/io",
+            addTrailingSlash: false,
+        });
+
+        socketInstance.on("connection.update", (data: { sessionId?: string; status: string }) => {
+            if (data?.sessionId) {
+                setSessions(prev => prev.map(s => {
+                    if (s.sessionId === data.sessionId) {
+                        return { ...s, status: data.status };
+                    }
+                    return s;
+                }));
+            }
+        });
+
+        return () => {
+            socketInstance.disconnect();
+        };
     }, []);
 
     const setSessionId = (id: string) => {

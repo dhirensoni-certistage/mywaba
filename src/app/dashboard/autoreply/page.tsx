@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getAutoReplies, createAutoReply, deleteAutoReply, updateAutoReply } from "./actions";
 import { SessionGuard } from "@/components/dashboard/session-guard";
+import { MediaUploadInput } from "@/components/dashboard/media-upload-input";
 
 interface AutoReply {
     id: string;
@@ -263,28 +264,31 @@ export default function AutoReplyPage() {
                                 <p className="text-xs text-muted-foreground">You can use standard WhatsApp formatting (*bold*, _italic_, ~strikethrough~)</p>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Media URL (Optional)</Label>
-                                    <Input 
-                                        value={mediaUrl} 
-                                        onChange={(e) => setMediaUrl(e.target.value)} 
-                                        placeholder="https://example.com/image.jpg" 
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Media Type</Label>
-                                    <Select value={mediaType} onValueChange={setMediaType}>
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="image">Image</SelectItem>
-                                            <SelectItem value="video">Video</SelectItem>
-                                            <SelectItem value="document">Document</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
+                            <div className="space-y-4">
+                                <MediaUploadInput
+                                    value={mediaUrl}
+                                    mediaType={mediaType}
+                                    onChange={(url, type) => {
+                                        setMediaUrl(url);
+                                        if (type) setMediaType(type);
+                                    }}
+                                    label="Media Attachment (Optional)"
+                                />
+                                {mediaUrl && (
+                                    <div className="space-y-2">
+                                        <Label>Media Type</Label>
+                                        <Select value={mediaType} onValueChange={setMediaType}>
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="image">Image</SelectItem>
+                                                <SelectItem value="video">Video</SelectItem>
+                                                <SelectItem value="document">Document</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <DialogFooter>
@@ -428,28 +432,31 @@ export default function AutoReplyPage() {
                             />
                             <p className="text-xs text-muted-foreground">You can use standard WhatsApp formatting (*bold*, _italic_, ~strikethrough~)</p>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>Media URL (Optional)</Label>
-                                <Input 
-                                    value={editMediaUrl} 
-                                    onChange={(e) => setEditMediaUrl(e.target.value)} 
-                                    placeholder="https://example.com/image.jpg" 
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Media Type</Label>
-                                <Select value={editMediaType} onValueChange={setEditMediaType}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="image">Image</SelectItem>
-                                        <SelectItem value="video">Video</SelectItem>
-                                        <SelectItem value="document">Document</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                        <div className="space-y-4">
+                            <MediaUploadInput
+                                value={editMediaUrl}
+                                mediaType={editMediaType}
+                                onChange={(url, type) => {
+                                    setEditMediaUrl(url);
+                                    if (type) setEditMediaType(type);
+                                }}
+                                label="Media Attachment (Optional)"
+                            />
+                            {editMediaUrl && (
+                                <div className="space-y-2">
+                                    <Label>Media Type</Label>
+                                    <Select value={editMediaType} onValueChange={setEditMediaType}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="image">Image</SelectItem>
+                                            <SelectItem value="video">Video</SelectItem>
+                                            <SelectItem value="document">Document</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
                         </div>
                     </div>
                     <DialogFooter>

@@ -82,3 +82,79 @@ export async function GET(
         return NextResponse.json({ status: false, message: "Internal Server Error", error: "Internal Server Error" }, { status: 500 });
     }
 }
+
+export async function POST(
+    req: NextRequest,
+    { params }: { params: Promise<{ sessionId: string }> }
+) {
+    try {
+        const user = await getAuthenticatedUser(req);
+        if (!user) {
+            return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
+        }
+
+        const { sessionId } = await params;
+        const canAccess = await canAccessSession(user.id, user.role, sessionId);
+        if (!canAccess) {
+            return NextResponse.json({ status: false, message: "Forbidden - Cannot access this session", error: "Forbidden - Cannot access this session" }, { status: 403 });
+        }
+
+        const sessionData = await prisma.session.findUnique({
+            where: { sessionId: sessionId },
+            select: { id: true }
+        });
+
+        if (!sessionData) {
+            return NextResponse.json({ status: false, message: "Session not found", error: "Session not found" }, { status: 404 });
+        }
+
+        const body = await req.json();
+        const rawContacts: Array<{ name?: string; phone: string }> = Array.isArray(body.contacts) ? body.contacts : [];
+
+        if (rawContacts.length === 0) {
+            return NextResponse.json({ status: false, message: "No contacts provided" }, { status: 400 });
+        }
+
+        const upsertPromises = rawContacts.map(async (c) => {
+            const rawPhone = String(c.phone || "").trim();
+            const cleanPhone = rawPhone.replace(/\D/g, "");
+            if (!cleanPhone || cleanPhone.length < 5) return null;
+
+            const jid = `${cleanPhone}@s.whatsapp.net`;
+            const contactName = c.name?.trim() || cleanPhone;
+
+            return prisma.contact.upsert({
+                where: {
+                    sessionId_jid: {
+                        sessionId: sessionData.id,
+                        jid: jid
+                    }
+                },
+                create: {
+                    sessionId: sessionData.id,
+                    jid: jid,
+                    name: contactName,
+                    notify: contactName,
+                    remoteJidAlt: cleanPhone
+                },
+                update: {
+                    name: c.name?.trim() ? c.name.trim() : undefined,
+                    notify: c.name?.trim() ? c.name.trim() : undefined,
+                    remoteJidAlt: cleanPhone
+                }
+            });
+        });
+
+        const results = await Promise.allSettled(upsertPromises);
+        const importedCount = results.filter(r => r.status === "fulfilled" && (r as PromiseFulfilledResult<any>).value !== null).length;
+
+        return NextResponse.json({
+            status: true,
+            message: `Successfully imported ${importedCount} contacts`,
+            data: { imported: importedCount, total: rawContacts.length }
+        });
+    } catch (error: any) {
+        console.error("Error importing contacts:", error);
+        return NextResponse.json({ status: false, message: error.message || "Failed to import contacts" }, { status: 500 });
+    }
+}

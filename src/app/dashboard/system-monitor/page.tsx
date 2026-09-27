@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Activity, Cpu, HardDrive, Network, Server, MemoryStick } from "lucide-react";
+import { Activity, Cpu, HardDrive, Network, Server, MemoryStick, ArrowDown, ArrowUp } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
@@ -158,7 +158,7 @@ export default function SystemMonitorPage() {
                         <div className="text-2xl font-bold">{formatBytes(data.process.rss)}</div>
                         <Progress value={processMemPercent} className="h-2 mt-3" indicatorClassName="bg-green-500" />
                         <p className="text-xs text-muted-foreground mt-2">
-                            Uptime: {formatUptime(data.process.uptime)} ΓÇö Heap: {formatBytes(data.process.heapUsed)}
+                            Uptime: {formatUptime(data.process.uptime)} • Heap: {formatBytes(data.process.heapUsed)}
                         </p>
                     </CardContent>
                 </Card>
@@ -169,12 +169,16 @@ export default function SystemMonitorPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold space-y-1 mt-1">
-                            <div className="flex items-center text-sm">
-                                <span className="text-blue-500 font-bold w-10">Γåô RX</span>
+                            <div className="flex items-center gap-1.5 text-sm">
+                                <span className="text-blue-500 font-bold flex items-center gap-0.5 w-12">
+                                    <ArrowDown className="h-3.5 w-3.5" /> RX
+                                </span>
                                 <span>{formatBytes(data.network[0]?.rx_sec || 0)}/s</span>
                             </div>
-                            <div className="flex items-center text-sm">
-                                <span className="text-green-500 font-bold w-10">Γåæ TX</span>
+                            <div className="flex items-center gap-1.5 text-sm">
+                                <span className="text-green-500 font-bold flex items-center gap-0.5 w-12">
+                                    <ArrowUp className="h-3.5 w-3.5" /> TX
+                                </span>
                                 <span>{formatBytes(data.network[0]?.tx_sec || 0)}/s</span>
                             </div>
                         </div>

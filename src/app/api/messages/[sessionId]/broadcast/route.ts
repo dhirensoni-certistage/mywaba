@@ -7,8 +7,12 @@ import { z } from "zod";
 
 const broadcastBodySchema = z.object({
     recipients: z.array(z.string()),
-    message: z.string().min(1),
+    message: z.string().optional().default(""),
+    mediaUrl: z.string().optional().nullable(),
+    mediaType: z.string().optional().nullable(),
     delay: z.number().optional()
+}).refine(data => data.message?.trim() || data.mediaUrl?.trim(), {
+    message: "Either message or mediaUrl must be provided"
 });
 
 export async function POST(
@@ -29,7 +33,7 @@ export async function POST(
             return NextResponse.json({ error: parseResult.error.flatten() }, { status: 400 });
         }
 
-        const { recipients, message, delay } = parseResult.data;
+        const { recipients, message, mediaUrl, mediaType, delay } = parseResult.data;
 
         const canAccess = await canAccessSession(user.id, user.role, sessionId);
         if (!canAccess) {
@@ -45,7 +49,7 @@ export async function POST(
         const log = await prisma.broadcastLog.create({
             data: {
                 sessionId,
-                message,
+                message: message || (mediaUrl ? `[Media: ${mediaType || 'file'}]` : ""),
                 total: recipients.length,
                 delay: delay || 2000,
                 status: "running",
@@ -59,7 +63,26 @@ export async function POST(
             include: { recipients: true }
         });
 
-        const messageContent: AnyMessageContent = { text: message };
+        let messageContent: AnyMessageContent;
+        if (mediaUrl) {
+            let url = mediaUrl;
+            if (url.startsWith("/")) {
+                const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3030}`;
+                url = `${baseUrl.replace(/\/$/, "")}${url}`;
+            }
+            const type = mediaType || "image";
+            if (type === "video") {
+                messageContent = { video: { url }, caption: message || "" };
+            } else if (type === "document") {
+                messageContent = { document: { url }, caption: message || "", mimetype: "application/octet-stream", fileName: url.split("/").pop() || "file" };
+            } else if (type === "audio") {
+                messageContent = { audio: { url }, mimetype: "audio/mp4" };
+            } else {
+                messageContent = { image: { url }, caption: message || "" };
+            }
+        } else {
+            messageContent = { text: message || "" };
+        }
         const io = (global as any).io;
         const broadcastId = log.id;
 

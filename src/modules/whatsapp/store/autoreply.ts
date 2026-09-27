@@ -149,7 +149,11 @@ export async function bindAutoReply(sock: WASocket, sessionId: string) {
                         logger.info("AutoReply", `Match: ${rule.keyword} -> ${remoteJid}`);
 
                         if (rule.isMedia && rule.mediaUrl) {
-                            const url = rule.mediaUrl;
+                            let url = rule.mediaUrl;
+                            if (url.startsWith("/")) {
+                                const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3030}`;
+                                url = `${baseUrl.replace(/\/$/, "")}${url}`;
+                            }
                             const type = (rule as any).mediaType || "document";
                             
                             let payload: any = {};

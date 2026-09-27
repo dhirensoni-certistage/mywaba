@@ -34,6 +34,7 @@ import {
 import { SearchFilter } from "@/components/dashboard/search-filter";
 import { useSession } from "@/components/dashboard/session-provider";
 import { SessionGuard } from "@/components/dashboard/session-guard";
+import { MediaUploadInput } from "@/components/dashboard/media-upload-input";
 
 interface ScheduledMessage {
     id: string;
@@ -531,22 +532,29 @@ export default function SchedulerPage() {
                                 <Textarea value={newContent} onChange={e => setNewContent(e.target.value)} placeholder="Hello!" />
                             </div>
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Media URL (Optional)</Label>
-                                    <Input value={newMediaUrl} onChange={e => setNewMediaUrl(e.target.value)} placeholder="https://..." />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Media Type</Label>
-                                    <Select value={newMediaType} onValueChange={setNewMediaType}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="image">Image</SelectItem>
-                                            <SelectItem value="video">Video</SelectItem>
-                                            <SelectItem value="document">Document</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
+                            <div className="space-y-4">
+                                <MediaUploadInput
+                                    value={newMediaUrl}
+                                    mediaType={newMediaType}
+                                    onChange={(url, type) => {
+                                        setNewMediaUrl(url);
+                                        if (type) setNewMediaType(type);
+                                    }}
+                                    label="Media Attachment (Optional)"
+                                />
+                                {newMediaUrl && (
+                                    <div className="space-y-2">
+                                        <Label>Media Type</Label>
+                                        <Select value={newMediaType} onValueChange={setNewMediaType}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="image">Image</SelectItem>
+                                                <SelectItem value="video">Video</SelectItem>
+                                                <SelectItem value="document">Document</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                )}
                             </div>
                             <div className="flex justify-end gap-2 mt-4">
                                 <Button variant="ghost" onClick={() => setShowForm(false)}>Cancel</Button>
@@ -670,22 +678,29 @@ export default function SchedulerPage() {
                                 <Label>Message (Optional)</Label>
                                 <Textarea value={editContent} onChange={e => setEditContent(e.target.value)} />
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>Media URL (Optional)</Label>
-                                    <Input value={editMediaUrl} onChange={e => setEditMediaUrl(e.target.value)} />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Media Type</Label>
-                                    <Select value={editMediaType} onValueChange={setEditMediaType}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="image">Image</SelectItem>
-                                            <SelectItem value="video">Video</SelectItem>
-                                            <SelectItem value="document">Document</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
+                            <div className="space-y-4">
+                                <MediaUploadInput
+                                    value={editMediaUrl}
+                                    mediaType={editMediaType}
+                                    onChange={(url, type) => {
+                                        setEditMediaUrl(url);
+                                        if (type) setEditMediaType(type);
+                                    }}
+                                    label="Media Attachment (Optional)"
+                                />
+                                {editMediaUrl && (
+                                    <div className="space-y-2">
+                                        <Label>Media Type</Label>
+                                        <Select value={editMediaType} onValueChange={setEditMediaType}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="image">Image</SelectItem>
+                                                <SelectItem value="video">Video</SelectItem>
+                                                <SelectItem value="document">Document</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <DialogFooter>

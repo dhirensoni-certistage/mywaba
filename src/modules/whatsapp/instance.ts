@@ -102,7 +102,9 @@ export class WhatsAppInstance {
                 this.qr = qr;
                 this.status = "SCAN_QR";
 
-                this.io?.to(this.sessionId).emit("connection.update", { status: this.status, qr });
+                const qrPayload = { sessionId: this.sessionId, status: this.status, qr };
+                this.io?.emit("connection.update", qrPayload);
+                this.io?.to(this.sessionId).emit("connection.update", qrPayload);
 
                 await prisma.session.update({
                     where: { sessionId: this.sessionId },
@@ -119,7 +121,9 @@ export class WhatsAppInstance {
                     this.status = "LOGGED_OUT";
                     this.socket = null;
                     this.config = {};
-                    this.io?.to(this.sessionId).emit("connection.update", { status: "LOGGED_OUT", qr: null });
+                    const logoutPayload = { sessionId: this.sessionId, status: "LOGGED_OUT", qr: null };
+                    this.io?.emit("connection.update", logoutPayload);
+                    this.io?.to(this.sessionId).emit("connection.update", logoutPayload);
 
                     logger.info("Instance", `Session ${this.sessionId} logged out. Deleting credentials...`);
                     try {
@@ -145,7 +149,9 @@ export class WhatsAppInstance {
                     this.status = "STOPPED";
                     this.socket = null;
                     this.reconnectCount = 0;
-                    this.io?.to(this.sessionId).emit("connection.update", { status: "STOPPED", qr: null });
+                    const stoppedPayload = { sessionId: this.sessionId, status: "STOPPED", qr: null };
+                    this.io?.emit("connection.update", stoppedPayload);
+                    this.io?.to(this.sessionId).emit("connection.update", stoppedPayload);
 
                     await prisma.session.update({
                         where: { sessionId: this.sessionId },
@@ -165,7 +171,9 @@ export class WhatsAppInstance {
 
                 if (remaining > 0) {
                     this.status = "DISCONNECTED";
-                    this.io?.to(this.sessionId).emit("connection.update", { status: "DISCONNECTED", qr: null });
+                    const dcPayload = { sessionId: this.sessionId, status: "DISCONNECTED", qr: null };
+                    this.io?.emit("connection.update", dcPayload);
+                    this.io?.to(this.sessionId).emit("connection.update", dcPayload);
                     await prisma.session.update({
                         where: { sessionId: this.sessionId },
                         data: { status: "DISCONNECTED", qr: null }
@@ -183,7 +191,9 @@ export class WhatsAppInstance {
                     this.socket = null;
                     this.reconnectCount = 0;
                     this.isStopped = true; // prevent further retries
-                    this.io?.to(this.sessionId).emit("connection.update", { status: "STOPPED", qr: null });
+                    const autoStopPayload = { sessionId: this.sessionId, status: "STOPPED", qr: null };
+                    this.io?.emit("connection.update", autoStopPayload);
+                    this.io?.to(this.sessionId).emit("connection.update", autoStopPayload);
 
                     await prisma.session.update({
                         where: { sessionId: this.sessionId },
@@ -206,7 +216,9 @@ export class WhatsAppInstance {
                 this.qr = null;
                 this.startTime = new Date();
 
-                this.io?.to(this.sessionId).emit("connection.update", { status: "CONNECTED", qr: null });
+                const connPayload = { sessionId: this.sessionId, status: "CONNECTED", qr: null };
+                this.io?.emit("connection.update", connPayload);
+                this.io?.to(this.sessionId).emit("connection.update", connPayload);
 
                 try {
                     await syncGroups(this.socket as WASocket, this.sessionId);
@@ -248,11 +260,14 @@ export class WhatsAppInstance {
             this.pairingCode = code;
             this.status = "SCAN_QR";
 
-            this.io?.to(this.sessionId).emit("connection.update", {
+            const pairPayload = {
+                sessionId: this.sessionId,
                 status: this.status,
                 qr: this.qr,
                 pairingCode: code
-            });
+            };
+            this.io?.emit("connection.update", pairPayload);
+            this.io?.to(this.sessionId).emit("connection.update", pairPayload);
 
             return code;
         } catch (error) {

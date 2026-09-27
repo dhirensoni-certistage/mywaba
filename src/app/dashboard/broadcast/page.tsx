@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { useSession } from "@/components/dashboard/session-provider";
 import { SessionGuard } from "@/components/dashboard/session-guard";
 import { useSocket } from "@/components/chat/socket-context";
+import { MediaUploadInput } from "@/components/dashboard/media-upload-input";
 
 interface BroadcastProgress {
     broadcastId: string;
@@ -54,6 +55,8 @@ export default function BroadcastPage() {
     const { sessionId } = useSession();
     const [contacts, setContacts] = useState("");
     const [message, setMessage] = useState("");
+    const [mediaUrl, setMediaUrl] = useState("");
+    const [mediaType, setMediaType] = useState("image");
     const [delay, setDelay] = useState([2000]);
     const [loading, setLoading] = useState(false);
     const [broadcastProgress, setBroadcastProgress] = useState<BroadcastProgress | null>(null);
@@ -139,7 +142,7 @@ export default function BroadcastPage() {
 
     const handleSend = async () => {
         if (!sessionId) return toast.error("No active session found");
-        if (!message.trim()) return toast.error("Message cannot be empty");
+        if (!message.trim() && !mediaUrl.trim()) return toast.error("Message or media cannot be empty");
         setLoading(true);
         setBroadcastProgress(null);
 
@@ -161,6 +164,8 @@ export default function BroadcastPage() {
                 body: JSON.stringify({
                     recipients,
                     message,
+                    mediaUrl: mediaUrl.trim() || undefined,
+                    mediaType: mediaUrl.trim() ? (mediaType || "image") : undefined,
                     delay: delay[0]
                 })
             });
@@ -253,17 +258,30 @@ export default function BroadcastPage() {
                                 </CardHeader>
                                 <CardContent className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label>Message</Label>
+                                        <Label>Message (Optional if media attached)</Label>
                                         <Textarea
-                                            placeholder="Type your message here..."
-                                            className="min-h-[150px]"
+                                            placeholder="Type your message or media caption here..."
+                                            className="min-h-[120px]"
                                             value={message}
                                             onChange={e => setMessage(e.target.value)}
                                             disabled={loading}
                                         />
                                     </div>
 
-                                    <div className="space-y-4 pt-4">
+                                    <div className="space-y-2">
+                                        <MediaUploadInput
+                                            value={mediaUrl}
+                                            mediaType={mediaType}
+                                            onChange={(url, type) => {
+                                                setMediaUrl(url);
+                                                if (type) setMediaType(type);
+                                            }}
+                                            label="Media Attachment (Optional)"
+                                            helperText="Attach an image, video, audio or document to broadcast"
+                                        />
+                                    </div>
+
+                                    <div className="space-y-4 pt-2">
                                         <div className="space-y-2">
                                             <Label>Delay: {(delay[0] / 1000).toFixed(1)}s</Label>
                                             <Slider
@@ -275,13 +293,13 @@ export default function BroadcastPage() {
                                                 onValueChange={setDelay}
                                                 disabled={loading}
                                             />
-                                            <p className="text-xs text-muted-foreground">Delay antar pesan (+ random).</p>
+                                            <p className="text-xs text-muted-foreground">Delay between messages (+ random jitter to protect number reputation).</p>
                                         </div>
 
                                         <Button
                                             className="w-full"
                                             onClick={handleSend}
-                                            disabled={loading || !sessionId || recipientCount === 0 || !message.trim()}
+                                            disabled={loading || !sessionId || recipientCount === 0 || (!message.trim() && !mediaUrl.trim())}
                                         >
                                             {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                                             {loading ? "Broadcasting..." : "Start Broadcast"}
@@ -389,7 +407,7 @@ export default function BroadcastPage() {
                                 </div>
                             ) : history.length === 0 ? (
                                 <div className="text-center py-8 text-muted-foreground">
-                                    <p className="text-sm">Belum ada broadcast.</p>
+                                    <p className="text-sm">No broadcasts yet.</p>
                                 </div>
                             ) : (
                                 <div className="space-y-2">
