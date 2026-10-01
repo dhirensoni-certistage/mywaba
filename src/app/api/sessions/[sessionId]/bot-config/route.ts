@@ -59,7 +59,11 @@ export async function GET(
             quietHoursEnd: null,
             optOutEnabled: true,
             optOutKeywords: null,
-            optOutReply: null
+            optOutReply: null,
+            warmupEnabled: false,
+            warmupStartedAt: null,
+            broadcastPausedUntil: null,
+            broadcastPauseReason: null
         };
 
         return NextResponse.json({ status: true, message: "Bot config fetched successfully", data: session.botConfig });
@@ -117,6 +121,21 @@ export async function POST(
             safetyFields.optOutKeywords = list.length > 0 ? list : null;
         }
         if (body.optOutReply !== undefined) safetyFields.optOutReply = body.optOutReply ? String(body.optOutReply).slice(0, 1000) : null;
+        // Warm-up: enabling it starts the clock (if not already running); warmupReset restarts it at day 1
+        if (body.warmupEnabled !== undefined) {
+            safetyFields.warmupEnabled = Boolean(body.warmupEnabled);
+            if (body.warmupEnabled) {
+                const existing = await (prisma as any).botConfig.findUnique({ where: { sessionId: session.id }, select: { warmupStartedAt: true } });
+                if (!existing?.warmupStartedAt || body.warmupReset) safetyFields.warmupStartedAt = new Date();
+            }
+        } else if (body.warmupReset) {
+            safetyFields.warmupStartedAt = new Date();
+        }
+        // Manual resume after an auto-pause
+        if (body.resumeBroadcasts) {
+            safetyFields.broadcastPausedUntil = null;
+            safetyFields.broadcastPauseReason = null;
+        }
 
         // Upsert Config
         // @ts-ignore

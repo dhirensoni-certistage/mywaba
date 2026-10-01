@@ -52,6 +52,8 @@ export default function BotSettingsPage() {
         optOutEnabled: true,
         optOutKeywords: "STOP, UNSUBSCRIBE, STOP ALL, CANCEL",
         optOutReply: "",
+        warmupEnabled: false,
+        warmupStartedAt: null as string | null,
         botAllowedJids: [] as string[],
         botBlockedJids: [] as string[],
         autoReplyAllowedJids: [] as string[],
@@ -90,6 +92,8 @@ export default function BotSettingsPage() {
                             ? data.optOutKeywords.join(", ")
                             : "STOP, UNSUBSCRIBE, STOP ALL, CANCEL",
                         optOutReply: data.optOutReply || "",
+                        warmupEnabled: data.warmupEnabled ?? false,
+                        warmupStartedAt: data.warmupStartedAt || null,
                         botAllowedJids: data.botAllowedJids || [],
                         botBlockedJids: data.botBlockedJids || [],
                         autoReplyAllowedJids: data.autoReplyAllowedJids || [],
@@ -470,6 +474,30 @@ export default function BotSettingsPage() {
                                         </SelectContent>
                                     </Select>
                                     <p className="text-xs text-muted-foreground">Broadcasts pause inside this window (system timezone). Recommended 10 PM &ndash; 8 AM.</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-between space-x-2 border p-3 rounded-lg bg-blue-500/5 border-blue-500/20">
+                                <Label htmlFor="warmup" className="flex flex-col space-y-1">
+                                    <span className="font-semibold">Warm-up mode (new number)</span>
+                                    <span className="font-normal text-xs text-muted-foreground">
+                                        Caps broadcasts automatically for 3 weeks: days 1–3 → 20/day, 4–7 → 50, 8–14 → 100, 15–21 → 150, then your daily limit. Turn on for any number that is new or was recently logged out by WhatsApp.
+                                        {botConfig.warmupEnabled && botConfig.warmupStartedAt && (
+                                            <> Started {new Date(botConfig.warmupStartedAt).toLocaleDateString()} — day {Math.max(1, Math.floor((Date.now() - new Date(botConfig.warmupStartedAt).getTime()) / 86400000) + 1)} of 21.</>
+                                        )}
+                                    </span>
+                                </Label>
+                                <div className="flex items-center gap-2">
+                                    {botConfig.warmupEnabled && (
+                                        <Button type="button" variant="outline" size="sm" onClick={async () => {
+                                            if (!sessionId) return;
+                                            const res = await fetch(`/api/sessions/${sessionId}/bot-config`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ warmupEnabled: true, warmupReset: true }) });
+                                            if (res.ok) { toast.success("Warm-up restarted at day 1"); setBotConfig(prev => ({ ...prev, warmupStartedAt: new Date().toISOString() })); }
+                                            else toast.error("Failed to restart warm-up");
+                                        }}>Restart</Button>
+                                    )}
+                                    <Switch id="warmup" checked={botConfig.warmupEnabled}
+                                        onCheckedChange={c => setBotConfig(prev => ({ ...prev, warmupEnabled: c }))} />
                                 </div>
                             </div>
 

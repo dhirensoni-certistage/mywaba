@@ -1,3 +1,5 @@
+// Keep this first: installs globalThis.AsyncLocalStorage before anything can import next/headers
+import "./runtime-polyfills";
 import { loadEnvConfig } from "@next/env";
 // Load environment variables before any other imports/logic
 loadEnvConfig(process.cwd());
@@ -51,7 +53,7 @@ app.prepare().then(() => {
 
   // Initialize WhatsApp Manager (the message scheduler is started from its constructor)
   waManager.setup(io);
-  waManager.loadSessions();
+  waManager.loadSessions().catch(err => logger.error("Server", "Failed to load sessions on boot", err));
 
   // Close out broadcasts that were interrupted by the previous shutdown
   import("../modules/whatsapp/broadcast").then(m => m.recoverStaleBroadcasts());

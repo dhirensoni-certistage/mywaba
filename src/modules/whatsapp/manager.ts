@@ -10,7 +10,9 @@ export class WhatsAppManager {
     public io: Server | null = null;
 
     private constructor() {
-        initScheduler();
+        // The scheduler is started from setup(), once the HTTP server is up. Starting it in the
+        // constructor ran it during module evaluation, which breaks when cron.ts is the first
+        // module loaded (circular import: cron.ts -> manager.ts -> initScheduler before cron.ts finished).
     }
 
     public static getInstance(): WhatsAppManager {
@@ -22,6 +24,7 @@ export class WhatsAppManager {
 
     setup(io: Server) {
         this.io = io;
+        initScheduler();
     }
 
     async loadSessions() {

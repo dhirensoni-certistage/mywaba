@@ -16,8 +16,57 @@ import { normalizeJid } from "@/lib/jid-utils";
 
 export const DEFAULT_OPT_OUT_KEYWORDS = ["STOP", "UNSUBSCRIBE", "STOP ALL", "CANCEL"];
 
+/**
+ * Warm-up schedule for a new number: daily cap by day since warm-up started.
+ * After the last step the configured daily limit applies.
+ */
+export const WARMUP_SCHEDULE: { untilDay: number; cap: number }[] = [
+    { untilDay: 3, cap: 20 },
+    { untilDay: 7, cap: 50 },
+    { untilDay: 14, cap: 100 },
+    { untilDay: 21, cap: 150 },
+];
+export const WARMUP_DAYS = WARMUP_SCHEDULE[WARMUP_SCHEDULE.length - 1].untilDay;
+
+export function warmupDay(startedAt: Date | null | undefined, now = new Date()): number {
+    if (!startedAt) return 1;
+    return Math.max(1, Math.floor((now.getTime() - startedAt.getTime()) / 86400000) + 1);
+}
+
+/** Cap for the given warm-up day, or null once warm-up is over. */
+export function warmupCapForDay(day: number): number | null {
+    for (const step of WARMUP_SCHEDULE) if (day <= step.untilDay) return step.cap;
+    return null;
+}
+
+export interface EffectiveLimit {
+    /** 0 = unlimited */
+    limit: number;
+    source: "warmup" | "daily" | "none";
+    warmupDay: number | null;
+    warmupCap: number | null;
+}
+
+/** The limit that actually applies today: the warm-up cap while warming up, else the daily limit. */
+export function effectiveDailyLimit(cfg: { dailyBroadcastLimit: number; warmupEnabled: boolean; warmupStartedAt: Date | null }, now = new Date()): EffectiveLimit {
+    if (cfg.warmupEnabled) {
+        const day = warmupDay(cfg.warmupStartedAt, now);
+        const cap = warmupCapForDay(day);
+        if (cap !== null) {
+            const limit = cfg.dailyBroadcastLimit > 0 ? Math.min(cap, cfg.dailyBroadcastLimit) : cap;
+            return { limit, source: "warmup", warmupDay: day, warmupCap: cap };
+        }
+        return { limit: cfg.dailyBroadcastLimit, source: cfg.dailyBroadcastLimit > 0 ? "daily" : "none", warmupDay: day, warmupCap: null };
+    }
+    return { limit: cfg.dailyBroadcastLimit, source: cfg.dailyBroadcastLimit > 0 ? "daily" : "none", warmupDay: null, warmupCap: null };
+}
+
 export interface SafetyConfig {
     dailyBroadcastLimit: number;
+    warmupEnabled: boolean;
+    warmupStartedAt: Date | null;
+    broadcastPausedUntil: Date | null;
+    broadcastPauseReason: string | null;
     quietHoursStart: number | null;
     quietHoursEnd: number | null;
     optOutEnabled: boolean;
@@ -32,6 +81,10 @@ export function readSafetyConfig(botConfig: any): SafetyConfig {
     const toHour = (v: unknown) => (v === null || v === undefined || v === "" ? null : Math.max(0, Math.min(23, Number(v))));
     return {
         dailyBroadcastLimit: Math.max(0, Number(botConfig?.dailyBroadcastLimit ?? 200)),
+        warmupEnabled: Boolean(botConfig?.warmupEnabled),
+        warmupStartedAt: botConfig?.warmupStartedAt ? new Date(botConfig.warmupStartedAt) : null,
+        broadcastPausedUntil: botConfig?.broadcastPausedUntil ? new Date(botConfig.broadcastPausedUntil) : null,
+        broadcastPauseReason: botConfig?.broadcastPauseReason || null,
         quietHoursStart: toHour(botConfig?.quietHoursStart),
         quietHoursEnd: toHour(botConfig?.quietHoursEnd),
         optOutEnabled: botConfig?.optOutEnabled ?? true,
@@ -195,3 +248,75 @@ export async function handleOptOut(sock: WASocket, dbSessionId: string, msg: WAM
         return false;
     }
 }
+
+
+/** Is broadcasting currently auto-paused for this session? */
+export function isBroadcastPaused(safety: SafetyConfig, now = new Date()): boolean {
+    return !!safety.broadcastPausedUntil && safety.broadcastPausedUntil.getTime() > now.getTime();
+}
+
+/** Pause broadcasting on a session (delivery monitor) — stored on BotConfig so it survives restarts. */
+export async function pauseBroadcasts(sessionId: string, hours: number, reason: string) {
+    const until = new Date(Date.now() + hours * 3600 * 1000);
+    await prisma.botConfig.updateMany({
+        where: { session: { sessionId } },
+        data: { broadcastPausedUntil: until, broadcastPauseReason: reason }
+    }).catch(() => {});
+    return until;
+}
+
+export async function resumeBroadcasts(sessionId: string) {
+    await prisma.botConfig.updateMany({
+        where: { session: { sessionId } },
+        data: { broadcastPausedUntil: null, broadcastPauseReason: null }
+    }).catch(() => {});
+}
+
+export interface EngagementStats {
+    windowHours: number;
+    sent: number;
+    delivered: number;
+    read: number;
+    replied: number;
+    /** Sent more than 10 minutes ago and still without a delivery receipt */
+    undeliveredStale: number;
+    staleBase: number;
+    deliveredRate: number | null;
+    readRate: number | null;
+    replyRate: number | null;
+    undeliveredStaleRate: number | null;
+}
+
+/** Delivery / read / reply rates for this session's broadcasts in the trailing window. */
+export async function getEngagementStats(sessionId: string, windowHours = 24 * 7): Promise<EngagementStats> {
+    const since = new Date(Date.now() - windowHours * 3600 * 1000);
+    const staleBefore = new Date(Date.now() - 10 * 60 * 1000);
+    const base = { status: "sent", sentAt: { gte: since }, broadcastLog: { sessionId } } as const;
+    const [sent, delivered, read, replied, staleBase, undeliveredStale] = await Promise.all([
+        prisma.broadcastRecipient.count({ where: base }),
+        prisma.broadcastRecipient.count({ where: { ...base, deliveryStatus: { in: ["DELIVERED", "READ"] } } }),
+        prisma.broadcastRecipient.count({ where: { ...base, deliveryStatus: "READ" } }),
+        prisma.broadcastRecipient.count({ where: { ...base, repliedAt: { not: null } } }),
+        prisma.broadcastRecipient.count({ where: { ...base, sentAt: { gte: since, lte: staleBefore } } }),
+        prisma.broadcastRecipient.count({ where: { ...base, sentAt: { gte: since, lte: staleBefore }, OR: [{ deliveryStatus: null }, { deliveryStatus: "SENT" }] } }),
+    ]);
+    const rate = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : null);
+    return {
+        windowHours, sent, delivered, read, replied, undeliveredStale, staleBase,
+        deliveredRate: rate(delivered, sent), readRate: rate(read, sent), replyRate: rate(replied, sent),
+        undeliveredStaleRate: rate(undeliveredStale, staleBase)
+    };
+}
+
+/** Thresholds for the delivery monitor. */
+export const MONITOR = {
+    /** Minimum sends (older than 10 min) before judging delivery collapse */
+    MIN_STALE_SAMPLE: 30,
+    /** % of 10-min-old sends still without a receipt that triggers auto-pause */
+    UNDELIVERED_PAUSE_PCT: 70,
+    /** Hours to pause after a collapse */
+    PAUSE_HOURS: 12,
+    /** Low-engagement warning: sends in 24h needed and reply % below which to warn */
+    LOW_REPLY_MIN_SENT: 100,
+    LOW_REPLY_PCT: 1,
+};

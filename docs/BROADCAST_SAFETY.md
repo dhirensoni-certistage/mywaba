@@ -76,6 +76,28 @@ Settings → Alerts (superadmin): Telegram (bot token + chat id, no server chang
 a broadcast that stopped or had delivery failures, and a number reaching 80% / 100% of its daily
 limit. Identical alerts are suppressed for 5 minutes. **Send Test Alert** verifies the channel.
 
+## Warm-up mode
+
+Bot Settings → Broadcast Safety → **Warm-up mode**. While on, the daily cap ramps automatically:
+days 1–3 → 20, 4–7 → 50, 8–14 → 100, 15–21 → 150, afterwards your daily limit (the lower of the two
+always wins). Turn it on for every new number and after every WhatsApp logout; **Restart** sets it
+back to day 1. During warm-up the number should also be used normally (chats, replies, groups).
+
+## Delivery & engagement monitoring
+
+Every broadcast message is tracked through WhatsApp receipts: `deliveryStatus` SENT → DELIVERED → READ,
+and `repliedAt` when the recipient writes back within 72 h. Number Health shows delivered / read /
+replied / "undelivered > 10 min" for the last 7 days and 24 h; History shows the same per broadcast.
+
+- **Auto-pause (delivery collapse)**: during a run, every 20 sends the engine looks at messages sent
+  more than 10 minutes ago. If at least 30 exist and 70 % or more still have a single tick, the run
+  stops, broadcasting on that number is paused for 12 hours (`BotConfig.broadcastPausedUntil`) and an
+  alert is sent. Single ticks at that scale mean WhatsApp is holding the messages or recipients are
+  blocking the number. Owners can "Resume anyway" from Number Health; do not resume with the same list.
+- **Low engagement warning**: every 30 minutes a monitor checks connected sessions; 100+ sends in
+  24 h with under 1 % replies produces one alert per day.
+- Healthy numbers: delivered above ~85 %, undelivered under ~30 %, replies above 1–2 % on warm lists.
+
 ## Buttons (BETA)
 
 Quick-reply, link and call buttons (max 3) can be attached on the Broadcast page. WhatsApp supports

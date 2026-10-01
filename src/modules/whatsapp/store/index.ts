@@ -195,6 +195,26 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
                     data: { status: status as any }
                 });
 
+                // Broadcast engagement tracking: receipts for messages the broadcast engine sent
+                if (status === 'DELIVERED' || status === 'READ') {
+                    const now = new Date();
+                    prisma.broadcastRecipient.updateMany({
+                        where: {
+                            messageId: keyId,
+                            // never downgrade READ back to DELIVERED
+                            ...(status === 'DELIVERED' ? { OR: [{ deliveryStatus: null }, { deliveryStatus: 'SENT' }] } : {})
+                        },
+                        data: status === 'READ'
+                            ? { deliveryStatus: 'READ', readAt: now, deliveredAt: undefined }
+                            : { deliveryStatus: 'DELIVERED', deliveredAt: now }
+                    }).then(async (r) => {
+                        // READ implies delivered — fill deliveredAt if it was never set
+                        if (status === 'READ' && r.count > 0) {
+                            await prisma.broadcastRecipient.updateMany({ where: { messageId: keyId, deliveredAt: null }, data: { deliveredAt: now } }).catch(() => {});
+                        }
+                    }).catch(() => {});
+                }
+
                 // Dispatch webhook for message status update
                 dispatchWebhook(sessionId, "message.status", {
                     keyId,
@@ -546,6 +566,21 @@ async function processAndSaveMessage(
                     remoteJidAlt: remoteJidAlt || undefined
                 } : {}
             });
+
+            // Broadcast engagement: a reply from someone we broadcast to in the last 72h
+            if (!fromMe && triggerWebhook) {
+                const since = new Date(Date.now() - 72 * 3600 * 1000);
+                prisma.broadcastRecipient.updateMany({
+                    where: {
+                        jid: { in: Array.from(new Set([finalRemoteJid, remoteJid, remoteJidAlt || ""].filter(Boolean))) },
+                        status: "sent",
+                        repliedAt: null,
+                        sentAt: { gte: since },
+                        broadcastLog: { sessionId }
+                    },
+                    data: { repliedAt: new Date() }
+                }).catch(() => {});
+            }
 
             // Welcome Message Logic
             if (!fromMe && triggerWebhook && config?.welcomeMessage && sock) {

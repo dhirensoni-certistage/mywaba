@@ -1,3 +1,5 @@
+> **Auto-deploy**: pushes to `main` can deploy themselves. In GitHub → Settings → Secrets and variables → Actions, add the secrets `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_APP_DIR` (and optionally `VPS_PORT`), then the repository **variable** `DEPLOY_ENABLED=true`. Until then, deploy by hand: `ssh` into the VPS and run `bash scripts/deploy.sh` in the app folder (pull → install → db push → build → PM2 reload).
+
 # 🔄 WA-AKG Update Guide
 
 Keep your **WA-AKG** instance up-to-date with the latest features, security patches, and performance improvements.

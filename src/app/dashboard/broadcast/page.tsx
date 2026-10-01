@@ -75,6 +75,24 @@ interface BroadcastHealth {
     timezone: string;
     sessionStatus: string;
     lastDisconnectReason: string | null;
+    effective?: { limit: number; source: "warmup" | "daily" | "none"; warmupDay: number | null; warmupCap: number | null; warmupEnabled: boolean; warmupTotalDays: number };
+    paused?: { until: string | null; reason: string | null; active: boolean };
+    engagement7d?: EngagementStats;
+    engagement24h?: EngagementStats;
+}
+
+interface EngagementStats {
+    windowHours: number;
+    sent: number;
+    delivered: number;
+    read: number;
+    replied: number;
+    undeliveredStale: number;
+    staleBase: number;
+    deliveredRate: number | null;
+    readRate: number | null;
+    replyRate: number | null;
+    undeliveredStaleRate: number | null;
 }
 
 // Mirrors BROADCAST_LIMITS on the server (src/modules/whatsapp/broadcast.ts)
@@ -104,6 +122,7 @@ interface BroadcastLog {
     startedAt: string;
     completedAt: string | null;
     _count?: { recipients: number };
+    engagement?: { replied: number; delivered: number; read: number };
     recipients?: BroadcastRecipient[];
 }
 
@@ -113,6 +132,8 @@ interface BroadcastRecipient {
     status: string;
     error: string | null;
     sentAt: string | null;
+    deliveryStatus?: string | null;
+    repliedAt?: string | null;
 }
 
 export default function BroadcastPage() {
@@ -267,6 +288,15 @@ export default function BroadcastPage() {
             setSavingLimit(false);
         }
     };
+
+    const resumeBroadcasts = async () => {
+        if (!sessionId) return;
+        if (!confirm("Resume broadcasting on this number? The monitor paused it because deliveries collapsed. Resuming with the same list can get the number banned.")) return;
+        const res = await fetch(`/api/sessions/${sessionId}/bot-config`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resumeBroadcasts: true }) });
+        if (res.ok) { toast.success("Broadcasting resumed"); fetchHealth(); } else toast.error("Failed to resume");
+    };
+
+    const pct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v}%`);
 
     // Excel / CSV upload → parsed recipients with per-row variables
     const handleFileUpload = async (file: File | null) => {
@@ -907,6 +937,8 @@ export default function BroadcastPage() {
                                             <li><strong className="text-foreground">Buttons are Beta.</strong> They show on most Android phones, often not on iPhone. Test with 5 people first.</li>
                                             <li><strong className="text-foreground">Something failed?</strong> History → Detail → <em>Retry failed</em> re-sends only the deliverable ones.</li>
                                             <li><strong className="text-foreground">Logged out mid-run?</strong> Stop for 24 hours, re-link, resume at half the volume. Alerts for this: Settings → Alerts.</li>
+                                            <li><strong className="text-foreground">New or recently logged-out number?</strong> Turn on <em>Warm-up mode</em> in Bot Settings → Broadcast Safety: 20 → 50 → 100 → 150/day over 3 weeks.</li>
+                                            <li><strong className="text-foreground">Watch Engagement.</strong> Undelivered rising above 30% or replies under 1% on big lists = stop and fix the list before WhatsApp does it for you.</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -925,7 +957,7 @@ export default function BroadcastPage() {
                                 <CardContent className="grid gap-3 sm:grid-cols-4">
                                     <div className="rounded-lg border p-3 sm:col-span-2">
                                         <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                                            <span>Sent in last 24h</span>
+                                            <span>Sent in last 24h{health.effective?.source === "warmup" ? ` · warm-up day ${health.effective.warmupDay}/${health.effective.warmupTotalDays}, cap ${health.effective.warmupCap}` : ""}</span>
                                             <span className={`font-mono font-medium ${budgetTone}`}>
                                                 {health.sentLast24h}{health.dailyLimit > 0 ? ` / ${health.dailyLimit}` : " (no limit)"}
                                             </span>
@@ -959,6 +991,30 @@ export default function BroadcastPage() {
                                         <p className="text-sm font-medium mt-1">{health.optedOutCount} contact{health.optedOutCount === 1 ? "" : "s"}</p>
                                         <p className="text-[11px] text-muted-foreground">Replied STOP — always skipped</p>
                                     </div>
+                                    {health.paused?.active && (
+                                        <div className="sm:col-span-4 flex items-start justify-between gap-3 text-xs text-red-700 bg-red-500/10 rounded-md px-3 py-2">
+                                            <div className="flex items-start gap-2">
+                                                <Ban className="h-4 w-4 mt-0.5 shrink-0" />
+                                                <span><strong>Broadcasting paused until {health.paused.until ? new Date(health.paused.until).toLocaleString() : "—"}.</strong> {health.paused.reason}</span>
+                                            </div>
+                                            {canEditLimit && <Button size="sm" variant="outline" className="h-7 text-xs shrink-0" onClick={resumeBroadcasts}>Resume anyway</Button>}
+                                        </div>
+                                    )}
+                                    {health.engagement7d && (
+                                        <div className="sm:col-span-4 rounded-lg border p-3">
+                                            <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+                                                <span>Engagement — last 7 days ({health.engagement7d.sent} sent)</span>
+                                                <span>last 24h: {health.engagement24h?.sent ?? 0} sent · {pct(health.engagement24h?.replyRate)} replied</span>
+                                            </div>
+                                            <div className="grid grid-cols-4 gap-2 text-center">
+                                                <div><div className="text-base font-semibold">{pct(health.engagement7d.deliveredRate)}</div><div className="text-[11px] text-muted-foreground">Delivered ✓✓</div></div>
+                                                <div><div className="text-base font-semibold">{pct(health.engagement7d.readRate)}</div><div className="text-[11px] text-muted-foreground">Read</div></div>
+                                                <div><div className={`text-base font-semibold ${health.engagement7d.replyRate !== null && health.engagement7d.sent >= 50 && health.engagement7d.replyRate < 1 ? "text-red-600" : ""}`}>{pct(health.engagement7d.replyRate)}</div><div className="text-[11px] text-muted-foreground">Replied</div></div>
+                                                <div><div className={`text-base font-semibold ${health.engagement7d.undeliveredStaleRate !== null && health.engagement7d.staleBase >= 30 && health.engagement7d.undeliveredStaleRate >= 50 ? "text-red-600" : ""}`}>{pct(health.engagement7d.undeliveredStaleRate)}</div><div className="text-[11px] text-muted-foreground">Undelivered &gt;10 min</div></div>
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground mt-2">Healthy: delivered above ~85%, undelivered under ~30%, replies above 1–2%. A run is stopped and the number paused for 12h automatically when 70%+ of messages stay undelivered — that is what a spam filter or mass blocking looks like.</p>
+                                        </div>
+                                    )}
                                     {health.lastDisconnectReason && (
                                         <div className="sm:col-span-4 flex items-start gap-2 text-xs text-yellow-700 bg-yellow-500/10 rounded-md px-3 py-2">
                                             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -1144,6 +1200,11 @@ export default function BroadcastPage() {
                                                     <span className="flex items-center gap-1">
                                                         <XCircle className="h-3 w-3 text-red-500" /> {log.failed}
                                                     </span>
+                                                    {log.engagement && log.sent > 0 && (
+                                                        <span className="hidden sm:inline" title="delivered / read / replied">
+                                                            ✓✓ {Math.round((log.engagement.delivered / log.sent) * 100)}% · 👁 {Math.round((log.engagement.read / log.sent) * 100)}% · ↩ {log.engagement.replied}
+                                                        </span>
+                                                    )}
                                                     <span className="flex items-center gap-1">
                                                         <Calendar className="h-3 w-3" /> {formatTime(log.startedAt)}
                                                     </span>
@@ -1272,6 +1333,20 @@ export default function BroadcastPage() {
                                     <li><strong className="text-foreground">Retry failed</strong> (History → Detail) re-sends only recipients that failed for a temporary reason. Not-on-WhatsApp and opted-out numbers are never retried.</li>
                                     <li><strong className="text-foreground">Alerts</strong> (Settings → Alerts, superadmin): Telegram or email when a session is logged out / stopped, a broadcast has failures, or a number used 80% of its daily limit.</li>
                                     <li><strong className="text-foreground">Staff accounts</strong> can broadcast and chat on shared sessions but cannot change settings, sessions, webhooks or limits — ask the owner.</li>
+                                </ul>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">Warm-up &amp; the delivery monitor</CardTitle>
+                            </CardHeader>
+                            <CardContent className="text-sm">
+                                <ul className="list-disc pl-5 space-y-1.5 text-muted-foreground">
+                                    <li><strong className="text-foreground">Warm-up mode</strong> (Bot Settings → Broadcast Safety) caps a number automatically: days 1–3 → 20/day, 4–7 → 50, 8–14 → 100, 15–21 → 150, then your daily limit. Use it for every new number and after every WhatsApp logout. During warm-up, chat normally and reply to people — the number must look used.</li>
+                                    <li><strong className="text-foreground">Engagement</strong> in Number Health shows delivered ✓✓, read, replied and &quot;undelivered &gt;10 min&quot; for the last 7 days / 24 h. Each History row shows the same per broadcast.</li>
+                                    <li><strong className="text-foreground">Auto-pause</strong>: while a run is going, if 70% or more of the messages sent more than 10 minutes ago still have a single tick, the run stops and broadcasting on that number is paused for 12 hours. Single ticks at that scale mean WhatsApp is holding your messages or recipients are blocking you. An alert is sent. &quot;Resume anyway&quot; exists for owners but is almost never the right move.</li>
+                                    <li><strong className="text-foreground">Low engagement alert</strong>: 100+ sends in 24 h with under 1% replies triggers a warning (once a day). Lists nobody answers are lists that report you.</li>
                                 </ul>
                             </CardContent>
                         </Card>
@@ -1466,6 +1541,11 @@ export default function BroadcastPage() {
                                                 >
                                                     <span className="font-mono truncate">{formatJid(r.jid)}</span>
                                                     <div className="flex items-center gap-2 shrink-0">
+                                                        {r.status === "sent" && (
+                                                            <span className="text-muted-foreground" title="Delivery status">
+                                                                {r.deliveryStatus === "READ" ? "👁 read" : r.deliveryStatus === "DELIVERED" ? "✓✓" : "✓"}{r.repliedAt ? " · ↩ replied" : ""}
+                                                            </span>
+                                                        )}
                                                         <span className={`px-1.5 py-0.5 rounded font-medium ${
                                                             r.status === "sent" ? "text-green-600 bg-green-500/10" :
                                                             r.status === "failed" ? "text-red-500 bg-red-500/10" : "text-muted-foreground bg-muted/50"
