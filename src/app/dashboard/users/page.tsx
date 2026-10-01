@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trash2, Plus, Edit, User, Shield, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useSession } from "next-auth/react";
 import {
@@ -80,15 +81,15 @@ export default function UsersPage() {
                 body: JSON.stringify(formData)
             });
 
+            const payload = await res.json().catch(() => ({}));
             if (res.ok) {
-                toast.success(editingUser ? "User updated" : "User created");
+                toast.success(payload?.message || (editingUser ? "User updated" : "User created"), { duration: 6000 });
                 setShowForm(false);
                 setEditingUser(null);
                 setFormData({ name: "", email: "", password: "", role: "OWNER" });
                 fetchUsers();
             } else {
-                const error = await res.json();
-                toast.error(error.error || "Operation failed");
+                toast.error(payload?.message || payload?.error || `Operation failed (${res.status})`);
             }
         } catch (error) {
             toast.error("Operation failed");
@@ -151,13 +152,17 @@ export default function UsersPage() {
                 </Button>
             </div>
 
-            {/* User Form Modal/Card */}
-            {showForm && (
-                <Card className="border-2 border-primary/20">
-                    <CardHeader>
-                        <CardTitle>{editingUser ? "Edit User" : "New User"}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
+            {/* User form — a dialog, so Edit works from anywhere on the page (the old inline card opened at the top, out of view) */}
+            <Dialog open={showForm} onOpenChange={(open) => { if (!open) { setShowForm(false); setEditingUser(null); } }}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{editingUser ? `Edit ${editingUser.name || editingUser.email}` : "New User"}</DialogTitle>
+                        <DialogDescription>
+                            {editingUser
+                                ? "Role changes apply within a minute (or on next login). Super Admin: everything · Owner: own numbers, bot setup, campaigns · Staff: chat & broadcast on shared numbers only."
+                                : "Super Admin: everything · Owner (clients): own numbers, bot setup, campaigns · Staff: chat & broadcast on shared numbers only."}
+                        </DialogDescription>
+                    </DialogHeader>
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                                 <div className="space-y-2">
@@ -206,13 +211,12 @@ export default function UsersPage() {
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2">
-                                <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>Cancel</Button>
+                                <Button type="button" variant="ghost" onClick={() => { setShowForm(false); setEditingUser(null); }}>Cancel</Button>
                                 <Button type="submit">{editingUser ? "Update" : "Create"}</Button>
                             </div>
                         </form>
-                    </CardContent>
-                </Card>
-            )}
+                </DialogContent>
+            </Dialog>
 
             {/* Users Table */}
             <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
