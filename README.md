@@ -148,6 +148,7 @@ We provide a built-in [start.sh](file:///home/aditya/project/WA-AKG/start.sh) sc
    ```bash
    npm run build
    ```
+   This builds the Next.js app **and** bundles the custom server to `dist/server/index.js` (esbuild). Production runs that file with plain `node` — no `tsx` at runtime.
 
 2. **Start with PM2**:
    Using the built-in [ecosystem.config.js](file:///home/aditya/project/WA-AKG/ecosystem.config.js) configuration file:
@@ -157,9 +158,9 @@ We provide a built-in [start.sh](file:///home/aditya/project/WA-AKG/start.sh) sc
 
 3. **Manage the process**:
    - View status: `pm2 status`
-   - View logs: `pm2 logs wa-akg`
-   - Stop process: `pm2 stop wa-akg`
-   - Restart process: `pm2 restart wa-akg`
+   - View logs: `pm2 logs waba`
+   - Stop process: `pm2 stop waba`
+   - Restart process: `pm2 restart waba`
 
 4. **Enable auto-start on server boot**:
    ```bash

@@ -43,12 +43,21 @@ npm run db:push
 
 #### 4. Build & Restart
 ```bash
-# Build the optimized production bundle
+# Build the Next.js app and the server bundle (dist/server/index.js)
 npm run build
 
 # Restart your process using PM2
-pm2 restart wa-akg
+pm2 restart waba
 ```
+
+> [!IMPORTANT]
+> **Upgrading from a version that started the server with `npx tsx` (≤ 1.6.5):** PM2 remembers the
+> script and interpreter from the first `pm2 start`, so `pm2 restart`/`reload` would keep running the
+> old tsx entry. Re-create the process once:
+> ```bash
+> pm2 delete waba && pm2 start ecosystem.config.js && pm2 save
+> ```
+> `bash scripts/deploy.sh` and `./start.sh` do this automatically.
 
 ---
 

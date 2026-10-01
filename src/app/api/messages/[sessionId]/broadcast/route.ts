@@ -42,7 +42,9 @@ const broadcastBodySchema = z.object({
     sessionIds: z.array(z.string()).optional(),
     /** Up to 3 interactive buttons (BETA). */
     buttons: z.array(buttonSchema).max(3).optional(),
-    footer: z.string().max(60).optional()
+    footer: z.string().max(60).optional(),
+    /** "interactive" (native-flow buttons, default) or "text" (buttons appended as plain lines — shows everywhere). */
+    buttonMode: z.enum(["interactive", "text"]).optional()
 }).refine(data => data.message?.trim() || data.mediaUrl?.trim(), {
     message: "Either message or mediaUrl must be provided"
 });
@@ -102,7 +104,7 @@ export async function POST(
             return NextResponse.json({ status: false, message: "Forbidden", error: "Forbidden" }, { status: 403 });
         }
 
-        const { recipients, message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, sessionIds, buttons, footer } = parseResult.data;
+        const { recipients, message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, sessionIds, buttons, footer, buttonMode } = parseResult.data;
 
         // ---- Multi-number rotation: split the list across every connected session the user may use ----
         const targetSessions: string[] = [sessionId];
@@ -119,7 +121,7 @@ export async function POST(
         const buckets: RecipientInput[][] = targetSessions.map(() => []);
         (recipients as RecipientInput[]).forEach((r, i) => { buckets[i % targetSessions.length].push(r); });
 
-        const common = { message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, buttons, footer };
+        const common = { message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, buttons, footer, buttonMode };
         const started: { sessionId: string; broadcastId: string; total: number; delayMs: number }[] = [];
         const invalid: string[] = [];
         const failures: { sessionId: string; error: string }[] = [];

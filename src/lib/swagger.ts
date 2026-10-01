@@ -1150,7 +1150,8 @@ All endpoints require authentication via:
                                             spreadHours: { type: "number", description: "Spread the run evenly over N hours (0–72). Overrides delay/batch settings; never below the 3 s minimum." },
                                             sessionIds: { type: "array", items: { type: "string" }, description: "Other connected sessions the caller may access; recipients are split round-robin across all numbers (one broadcast per number)." },
                                             buttons: { type: "array", maxItems: 3, description: "BETA interactive buttons.", items: { type: "object", properties: { type: { type: "string", enum: ["reply", "url", "call"] }, text: { type: "string", maxLength: 25 }, url: { type: "string" }, phone: { type: "string" } } } },
-                                            footer: { type: "string", maxLength: 60 }
+                                            footer: { type: "string", maxLength: 60 },
+                                            buttonMode: { type: "string", enum: ["interactive", "text"], description: "How buttons are sent: 'interactive' (native-flow buttons, BETA — most Android phones; unsupported clients show nothing) or 'text' (buttons appended as lines under the message; every client displays it). Default interactive. On rejection the run continues in text mode." }
                                         }
                                     }
                                 }

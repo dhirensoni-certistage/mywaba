@@ -100,12 +100,22 @@ replied / "undelivered > 10 min" for the last 7 days and 24 h; History shows the
 
 ## Buttons (BETA)
 
-Quick-reply, link and call buttons (max 3) can be attached on the Broadcast page. WhatsApp supports
-buttons officially only on the Business Platform API. From a linked device they are delivered as an
-"interactive message": most Android phones render them, iPhone and WhatsApp Web often show only the
-text. If WhatsApp rejects the interactive message the run automatically continues as plain text.
-Messages sent with buttons do not appear in the dashboard Chat view (they bypass the normal send path)
-but are tracked in Broadcast History.
+Quick-reply, link and call buttons (max 3) can be attached on the Broadcast page, in one of two modes
+(**Send as**):
+
+- **Interactive buttons** — a native-flow "interactive message". WhatsApp supports these officially only
+  on the Business Platform API. From a linked device most Android phones render them; iPhone and
+  WhatsApp Web often do not — and a client that does not support them shows **nothing at all**, not even
+  the text, while History still says "sent". The gateway sends the same stanza nodes official clients
+  use (`biz/interactive/native_flow` + `bot`), which is what makes them appear on Android; it cannot
+  make an unsupported phone display them. **Always send one test to your own phone first.**
+- **Text options** — the buttons are written as lines under the message (`👉 Reply *Yes*`,
+  `🔗 Website: https://…`, `📞 Call: +91…`, footer in italics). Displayed by every client. Use this for
+  anything important.
+
+If WhatsApp rejects an interactive message, the rest of the run is sent as text options automatically.
+Interactive messages do not appear in the dashboard Chat view (they bypass the normal send path) but
+are tracked in Broadcast History. Retry failed keeps the mode of the original run.
 
 ## Roles
 

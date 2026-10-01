@@ -76,6 +76,7 @@ export async function POST(
             spreadHours: opts.spreadHours,
             buttons: opts.buttons,
             footer: opts.footer || undefined,
+            buttonMode: opts.buttonMode === "text" ? "text" : undefined,
             retryOf: log.id
         });
 
