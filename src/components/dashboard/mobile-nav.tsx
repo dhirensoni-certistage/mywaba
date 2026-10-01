@@ -78,8 +78,8 @@ const navGroups: NavGroup[] = [
     {
         label: "Developer",
         items: [
-            { href: "/docs", label: "API Docs", icon: FileText },
-            { href: "/swagger", label: "Swagger UI", icon: Code, external: true },
+            { href: "/docs", label: "API Docs", icon: FileText, superadminOnly: true },
+            { href: "/swagger", label: "Swagger UI", icon: Code, external: true, superadminOnly: true },
         ],
     },
     {

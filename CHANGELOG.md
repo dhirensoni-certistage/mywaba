@@ -1,3 +1,12 @@
+## [v1.6.7] - 2026-10-01
+
+### Fixed
+- **Auto-reply only fired on an exactly typed keyword**: matching compared the raw lower-cased text, so "Price?", "price " or "PRICE 🙏" never matched `price`, and the **Starts With** type offered in the UI had no implementation at all (those rules never fired). New matcher (`src/modules/whatsapp/store/autoreply-match.ts`): case, punctuation, emojis and accents are ignored for every type; several triggers per rule with `|` (`price | rate | cost`); new default **Smart** type that tolerates typos (1 edit for 5+ letter words, 2 for 8+), plural/suffix forms and any word order; Starts With implemented. Existing rules keep their type but benefit from the normalisation.
+- **Developer section visible to clients and staff**: API Docs and Swagger UI are now superadmin-only in the sidebar and mobile nav (the vendor's tools, not the client's).
+
+### Changed
+- **Buttons**: documented that interactive (native-flow) button messages show a small "AI" tag on the recipient's phone — WhatsApp adds it to every bot-style message and it cannot be removed; Text options have no tag.
+
 ## [v1.6.6] - 2026-10-01
 
 ### Fixed

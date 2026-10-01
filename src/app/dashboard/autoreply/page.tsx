@@ -58,7 +58,7 @@ export default function AutoReplyPage() {
     
     const [keyword, setKeyword] = useState("");
     const [response, setResponse] = useState("");
-    const [matchType, setMatchType] = useState("EXACT");
+    const [matchType, setMatchType] = useState("SMART");
     const [triggerType, setTriggerType] = useState("ALL");
     const [mediaUrl, setMediaUrl] = useState("");
     const [mediaType, setMediaType] = useState("image");
@@ -142,7 +142,7 @@ export default function AutoReplyPage() {
     const resetForm = () => {
         setKeyword("");
         setResponse("");
-        setMatchType("EXACT");
+        setMatchType("SMART");
         setTriggerType("ALL");
         setMediaUrl("");
         setMediaType("image");
@@ -230,12 +230,14 @@ export default function AutoReplyPage() {
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="EXACT">Exact Match</SelectItem>
-                                            <SelectItem value="CONTAINS">Contains</SelectItem>
+                                            <SelectItem value="SMART">Smart (recommended) — typos, plurals, any order</SelectItem>
+                                            <SelectItem value="EXACT">Exact Match — whole message equals keyword</SelectItem>
+                                            <SelectItem value="CONTAINS">Contains — keyword phrase anywhere</SelectItem>
                                             <SelectItem value="STARTS_WITH">Starts With</SelectItem>
                                             <SelectItem value="REGEX">Regex Pattern</SelectItem>
                                         </SelectContent>
                                     </Select>
+                                    <p className="text-[11px] text-muted-foreground">Several triggers in one rule: separate them with <code className="bg-muted px-1 rounded">|</code> — e.g. <code className="bg-muted px-1 rounded">price | rate | cost</code>. Case, punctuation and emojis are ignored for every type except Regex. <strong>Smart</strong> also forgives typos (&quot;pricee&quot;, &quot;helo&quot;) and plurals and matches the words in any order.</p>
                                 </div>
                             </div>
 
@@ -399,6 +401,7 @@ export default function AutoReplyPage() {
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
+                                        <SelectItem value="SMART">Smart (recommended)</SelectItem>
                                         <SelectItem value="EXACT">Exact Match</SelectItem>
                                         <SelectItem value="CONTAINS">Contains</SelectItem>
                                         <SelectItem value="STARTS_WITH">Starts With</SelectItem>

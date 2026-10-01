@@ -84,7 +84,7 @@ export async function POST(
             sessionId: session.id,
             keyword,
             response,
-            matchType: matchType || "EXACT",
+            matchType: matchType || "SMART",
             isMedia: isMedia || false,
             mediaUrl: mediaUrl || null,
             mediaType: mediaType || null,

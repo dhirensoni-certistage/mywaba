@@ -108,7 +108,9 @@ Quick-reply, link and call buttons (max 3) can be attached on the Broadcast page
   WhatsApp Web often do not — and a client that does not support them shows **nothing at all**, not even
   the text, while History still says "sent". The gateway sends the same stanza nodes official clients
   use (`biz/interactive/native_flow` + `bot`), which is what makes them appear on Android; it cannot
-  make an unsupported phone display them. **Always send one test to your own phone first.**
+  make an unsupported phone display them. **Always send one test to your own phone first.** These
+  messages carry a small **"AI" tag** next to the time on the recipient's phone: WhatsApp labels every
+  bot-style (native-flow) message this way; it cannot be removed. Text options have no tag.
 - **Text options** — the buttons are written as lines under the message (`👉 Reply *Yes*`,
   `🔗 Website: https://…`, `📞 Call: +91…`, footer in italics). Displayed by every client. Use this for
   anything important.

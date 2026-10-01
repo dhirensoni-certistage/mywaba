@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { WASocket } from "@whiskeysockets/baileys";
 import { normalizeMessageContent } from "@whiskeysockets/baileys";
 import { logger } from "@/lib/logger";
+import { matchAutoReply } from "./autoreply-match";
 
 // Helper for permission check (Deduplicate from command-handler if possible, but keep simple here)
 function canAutoReply(config: any, fromMe: boolean, senderJid: string): boolean {
@@ -117,25 +118,10 @@ export async function bindAutoReply(sock: WASocket, sessionId: string) {
                 });
 
                 for (const rule of rules) {
-                    let match = false;
-                    const keyword = rule.keyword.toLowerCase();
-                    const incoming = text.toLowerCase();
-
-                    switch (rule.matchType) {
-                        case 'EXACT':
-                            match = incoming === keyword;
-                            break;
-                        case 'CONTAINS':
-                            match = incoming.includes(keyword);
-                            break;
-                        case 'REGEX':
-                            try {
-                                const regex = new RegExp(rule.keyword, 'i');
-                                match = regex.test(text); // Use original case for regex
-                            } catch (e) {
-                                logger.error("AutoReply", "Invalid regex in auto-reply", rule.keyword);
-                            }
-                            break;
+                    // Normalised, typo-tolerant matching with "a | b" alternatives — see autoreply-match.ts
+                    const match = matchAutoReply(rule, text);
+                    if (!match && rule.matchType === "REGEX") {
+                        try { new RegExp(rule.keyword, "i"); } catch { logger.error("AutoReply", "Invalid regex in auto-reply", rule.keyword); }
                     }
 
                     if (match) {
