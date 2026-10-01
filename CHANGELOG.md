@@ -1,3 +1,40 @@
+## [v1.6.5] - 2026-10-01
+
+### Fixed
+- **Broadcast mass-failure after WhatsApp logout**: A broadcast that lost its session mid-way (WhatsApp force-unlinked the device, 401 `device_removed`) kept looping through the remaining recipients every 2s, failing each one against a dead/null socket. The engine now watches the live session, waits up to 2 minutes for a reconnect, and otherwise aborts cleanly with the reason stored on the broadcast (`BroadcastLog.error`) and shown in the dashboard.
+- **Duplicate scheduler**: Two independent pollers (`node-cron` every minute and a `setInterval` every 30s) both sent due scheduled messages, so a message could go out twice and the database was polled twice as often. Only the cron runner remains; messages are claimed atomically (`PENDING -> SENDING`) before sending.
+- **Double sockets per session**: Clicking Start while a session was mid-reconnect created a second Baileys socket with duplicate event handlers. `init()` now disposes any existing socket first, and connection events from replaced sockets are ignored.
+- **Stale running broadcasts**: Broadcasts interrupted by a server restart stayed "running" forever in History. They are closed out as failed on boot.
+- **`connection.update` webhook never fired**: The event existed in the UI and docs but was never dispatched. It now fires on every status change (SCAN_QR, CONNECTED, DISCONNECTED, STOPPED, LOGGED_OUT).
+- **Unauthenticated realtime channel**: Socket.IO accepted any connection and let any client join any session room (full message stream) — connection updates were broadcast to all clients. Sockets now require a valid login cookie or API key, auto-join only the sessions the user can access, and `join-session` is verified with the same rule as the REST API.
+- **Stale role in server components**: Dashboard and chat pages read the role from the login token. A user demoted from SUPERADMIN kept superadmin visibility until re-login. Server components now read the role from the database.
+- **Stale session selection across accounts**: The `sessionId` cookie is cleared when it points to a session the current user cannot access.
+
+### Changed
+- **Broadcast engine rewritten for number safety** (`src/modules/whatsapp/broadcast.ts`):
+  - recipients are de-duplicated and verified with `onWhatsApp()` first; unregistered numbers are skipped instead of sent
+  - minimum delay 3s, default 8s (was 2s), random jitter up to +60%
+  - cooldown after every batch (default 20 messages / 60s, configurable)
+  - "typing…" presence before each message
+  - media is fetched once instead of being re-downloaded per recipient
+  - circuit breaker after 5 consecutive send failures
+  - maximum 500 recipients per broadcast
+  - new `POST /api/messages/{sessionId}/broadcast/{broadcastId}/cancel` and a Stop button in the dashboard
+  - new `GET /api/messages/{sessionId}/broadcast` returning the server-side safety limits
+- **Session reconnect**: exponential backoff (3s → 60s, 5 attempts) instead of 3 × 3s; `515 restartRequired` reconnects immediately without counting as a failure. The disconnect reason is logged and the session owner receives a dashboard notification explaining a logout or auto-stop.
+- **Retry receipts**: `getMessage` is now provided to Baileys (10-minute in-memory cache of sent messages), so recipients whose device requests a re-send actually get the message.
+- **`markOnlineOnConnect`** defaults to off unless "Always Online" is enabled in Bot Settings (permanently-online devices are an automation signal and hide notifications on the phone).
+
+### Performance
+- **Webhook dispatch cache**: `dispatchWebhook()` ran 4 queries per inbound message / receipt / contact update even when no webhook existed. Matching webhooks are now cached per session for 30s (invalidated on webhook create/update/delete).
+- **Webhook log cleanup** runs at most every 10 minutes per webhook and deletes by timestamp cutoff instead of loading every log id.
+- **Bot command handler** reuses the BotConfig already loaded by the store and checks the prefix before touching the database (previously 2 queries per incoming message).
+- **System monitor** no longer calls `si.diskLayout()` (unused; spawned `lsblk`/`smartctl`/`udevadm` on every poll) and serves a 2s cached snapshot.
+- **Session detail page** polls status/metrics every 15s instead of every 3s (6 `COUNT(*)` queries on the Message table per 3s per open tab). Status changes still arrive instantly over the socket.
+
+### Database
+- `BroadcastLog.error` (nullable text) — run `npx prisma db push` (done automatically by `start.sh`).
+
 ## [v1.6.4] - 2026-07-12
 
 ### Added

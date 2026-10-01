@@ -37,7 +37,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 const data = responseData?.data || [];
                 setSessions(data);
 
-                // Sync with cookie
+                // Sync with cookie. The cookie is per-browser, not per-account: after switching
+                // accounts it may still point at a session this user cannot access, so it is
+                // always re-validated against the list the server returned for *this* user.
                 const cookieId = getCookie("sessionId");
                 if (cookieId && data.find((s: Session) => s.sessionId === cookieId)) {
                     setSessionIdState(cookieId);
@@ -47,6 +49,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     setCookie("sessionId", first);
                 } else {
                     setSessionIdState("");
+                    if (cookieId) setCookie("sessionId", "", -1); // clear stale selection
                 }
             }
         } catch (error) {

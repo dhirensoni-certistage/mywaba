@@ -30,6 +30,72 @@ interface WebhookPayload {
 }
 
 /**
+ * Per-session cache of matching webhooks.
+ *
+ * dispatchWebhook() is called for EVERY inbound message, delivery receipt, read receipt,
+ * contact update and group update. Without a cache that was 4 database round-trips per
+ * event even when no webhook exists — after a broadcast, hundreds of receipts arrive within
+ * seconds and the database + Node CPU spiked. Entries live 30s and are invalidated when a
+ * webhook is created/updated/deleted.
+ */
+const WEBHOOK_CACHE_TTL_MS = 30_000;
+type CachedWebhooks = { webhooks: Awaited<ReturnType<typeof loadWebhooksForSession>>; cachedAt: number };
+const webhookCache = new Map<string, CachedWebhooks>();
+
+export function invalidateWebhookCache(sessionId?: string) {
+    if (sessionId) webhookCache.delete(sessionId);
+    else webhookCache.clear();
+}
+
+async function loadWebhooksForSession(sessionId: string) {
+    // Get the session to find the userId
+    const session = await prisma.session.findUnique({
+        where: { sessionId },
+        select: { id: true, userId: true }
+    });
+
+    if (!session) return null;
+
+    // Find all active webhooks for this user/session, shared access, and superadmins
+    const [accesses, superadmins] = await Promise.all([
+        prisma.sessionAccess.findMany({
+            where: { sessionId: session.id },
+            select: { userId: true }
+        }),
+        prisma.user.findMany({
+            where: { role: 'SUPERADMIN' },
+            select: { id: true }
+        })
+    ]);
+
+    const userIds = [
+        session.userId,
+        ...accesses.map(a => a.userId),
+        ...superadmins.map(s => s.id)
+    ];
+
+    return prisma.webhook.findMany({
+        where: {
+            isActive: true,
+            OR: [
+                { sessionId: null, userId: { in: userIds } }, // Global webhooks
+                { sessionId: session.id } // Session-specific webhooks
+            ]
+        }
+    });
+}
+
+async function getWebhooksForSession(sessionId: string) {
+    const cached = webhookCache.get(sessionId);
+    if (cached && Date.now() - cached.cachedAt < WEBHOOK_CACHE_TTL_MS) {
+        return cached.webhooks;
+    }
+    const webhooks = await loadWebhooksForSession(sessionId);
+    webhookCache.set(sessionId, { webhooks, cachedAt: Date.now() });
+    return webhooks;
+}
+
+/**
  * Dispatch webhook to all matching endpoints
  */
 export async function dispatchWebhook(
@@ -38,43 +104,12 @@ export async function dispatchWebhook(
     data: any
 ) {
     try {
-        // Get the session to find the userId
-        const session = await prisma.session.findUnique({
-            where: { sessionId },
-            select: { id: true, userId: true }
-        });
+        const webhooks = await getWebhooksForSession(sessionId);
 
-        if (!session) {
-            logger.warn("Webhook", `Dispatch: Session ${sessionId} not found`);
+        if (webhooks === null) {
+            logger.debug("Webhook", `Dispatch: Session ${sessionId} not found`);
             return;
         }
-
-        // Find all active webhooks for this user/session, shared access, and superadmins
-        const accesses = await prisma.sessionAccess.findMany({
-            where: { sessionId: session.id },
-            select: { userId: true }
-        });
-        
-        const superadmins = await prisma.user.findMany({
-            where: { role: 'SUPERADMIN' },
-            select: { id: true }
-        });
-        
-        const userIds = [
-            session.userId, 
-            ...accesses.map(a => a.userId),
-            ...superadmins.map(s => s.id)
-        ];
-
-        const webhooks = await prisma.webhook.findMany({
-            where: {
-                isActive: true,
-                OR: [
-                    { sessionId: null, userId: { in: userIds } }, // Global webhooks
-                    { sessionId: session.id } // Session-specific webhooks
-                ]
-            }
-        });
 
         if (webhooks.length === 0) return;
 
@@ -237,7 +272,20 @@ async function recordWebhookLog(data: {
     );
 }
 
+const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+const MAX_LOGS_PER_WEBHOOK = 500;
+const lastCleanupAt = new Map<string, number>();
+
+/**
+ * Trim webhook logs. Previously this ran after EVERY delivery and loaded every log id for the
+ * webhook into memory to decide what to delete. Now it runs at most once per 10 minutes per
+ * webhook and deletes by a cutoff timestamp instead of a giant id list.
+ */
 async function cleanupOldLogs(webhookId: string) {
+    const last = lastCleanupAt.get(webhookId) || 0;
+    if (Date.now() - last < CLEANUP_INTERVAL_MS) return;
+    lastCleanupAt.set(webhookId, Date.now());
+
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     await prisma.webhookLog.deleteMany({
         where: {
@@ -246,16 +294,18 @@ async function cleanupOldLogs(webhookId: string) {
         }
     });
 
-    const logs = await prisma.webhookLog.findMany({
+    // Find the newest log that falls outside the retention window and delete everything older.
+    const cutoff = await prisma.webhookLog.findMany({
         where: { webhookId },
         orderBy: { createdAt: 'desc' },
-        select: { id: true }
+        skip: MAX_LOGS_PER_WEBHOOK,
+        take: 1,
+        select: { createdAt: true }
     });
 
-    if (logs.length > 500) {
-        const idsToDelete = logs.slice(500).map(l => l.id);
+    if (cutoff.length > 0) {
         await prisma.webhookLog.deleteMany({
-            where: { id: { in: idsToDelete } }
+            where: { webhookId, createdAt: { lte: cutoff[0].createdAt } }
         });
     }
 }

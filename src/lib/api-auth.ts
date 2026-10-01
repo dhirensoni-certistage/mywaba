@@ -246,6 +246,29 @@ export async function getAccessibleSessions(userId: string, userRole: string) {
 }
 
 /**
+ * Light-weight variant of getAccessibleSessions: only the WhatsApp sessionId strings.
+ * Used by the Socket.IO layer to decide which rooms a connection may join.
+ */
+export async function getAccessibleSessionIds(userId: string, userRole: string): Promise<string[]> {
+    if (isAdmin(userRole)) {
+        const all = await prisma.session.findMany({ select: { sessionId: true } });
+        return all.map(s => s.sessionId);
+    }
+
+    const [owned, shared] = await Promise.all([
+        prisma.session.findMany({ where: { userId }, select: { sessionId: true } }),
+        prisma.sessionAccess.findMany({
+            where: { userId },
+            select: { session: { select: { sessionId: true } } }
+        })
+    ]);
+
+    const ids = new Set<string>(owned.map(s => s.sessionId));
+    for (const a of shared) if (a.session?.sessionId) ids.add(a.session.sessionId);
+    return Array.from(ids);
+}
+
+/**
  * Generate a new API key
  */
 export function generateApiKey(): string {

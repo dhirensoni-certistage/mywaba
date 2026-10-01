@@ -27,7 +27,7 @@ All endpoints require authentication via:
 
 ## 📊 Rate Limits
 - Phone check: Max 50 numbers per request
-- Broadcast: 10-20s random delay between messages
+- Broadcast: 3s minimum delay (8s default) with up to +60% random jitter, batch cooldowns, number validation
 - Message history: Max 100 messages
                 `,
             },
@@ -205,8 +205,9 @@ All endpoints require authentication via:
                             total: { type: "integer" },
                             sent: { type: "integer" },
                             failed: { type: "integer" },
-                            status: { type: "string", enum: ["running", "completed", "cancelled"] },
+                            status: { type: "string", enum: ["running", "completed", "cancelled", "failed"] },
                             delay: { type: "integer" },
+                            error: { type: "string", nullable: true, description: "Why the broadcast stopped early (logout, disconnect, cancelled...)" },
                             startedAt: { type: "string", format: "date-time" },
                             completedAt: { type: "string", format: "date-time", nullable: true }
                         }
@@ -1115,7 +1116,7 @@ All endpoints require authentication via:
                     post: {
                         tags: ["Messaging"],
                         summary: "Broadcast message to multiple recipients",
-                        description: "Send same message to multiple contacts with anti-ban delays (10-20s random)",
+                        description: "Send the same message to multiple contacts with anti-ban protection: recipients are validated with onWhatsApp() first, each send gets a random delay (min 3s, default 8s, +60% jitter), the engine cools down between batches, simulates typing, and aborts cleanly if the session disconnects. Max 500 recipients per call. Progress is pushed over Socket.IO as `broadcast.progress`.",
                         parameters: [
                             { name: "sessionId", in: "path", required: true, schema: { type: "string" } }
                         ],
@@ -1131,8 +1132,14 @@ All endpoints require authentication via:
                                                 items: { type: "string" },
                                                 example: ["919876543210@s.whatsapp.net", "919876543211@s.whatsapp.net"]
                                             },
-                                            message: { type: "string", example: "Flash Sale! 50% off" },
-                                            delay: { type: "number", description: "Optional delay (unused)" }
+                                            message: { type: "string", example: "Hi {name}, this is a reminder about Friday's seminar." },
+                                            mediaUrl: { type: "string", nullable: true, description: "Optional media URL (absolute, or a /api/media/... path)" },
+                                            mediaType: { type: "string", nullable: true, enum: ["image", "video", "audio", "document"] },
+                                            delay: { type: "number", description: "Delay between messages in ms. Clamped to 3000–120000 (default 8000)." },
+                                            batchSize: { type: "number", description: "Messages per batch before a cooldown. 5–100 (default 20)." },
+                                            batchPauseMs: { type: "number", description: "Cooldown between batches in ms. 15000–600000 (default 60000)." },
+                                            simulateTyping: { type: "boolean", description: "Send 'composing' presence before each message (default true)." },
+                                            validateNumbers: { type: "boolean", description: "Skip numbers not registered on WhatsApp (default true)." }
                                         }
                                     }
                                 }
@@ -1146,17 +1153,56 @@ All endpoints require authentication via:
                                         schema: {
                                             type: "object",
                                             properties: {
-                                                success: { type: "boolean", example: true },
-                                                message: { type: "string", example: "Broadcast started in background" }
+                                                status: { type: "boolean", example: true },
+                                                message: { type: "string", example: "Broadcast started" },
+                                                data: {
+                                                    type: "object",
+                                                    properties: {
+                                                        broadcastId: { type: "string" },
+                                                        total: { type: "number", description: "Recipients after de-duplication" },
+                                                        invalidRecipients: { type: "array", items: { type: "string" }, description: "Inputs rejected as malformed numbers" }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             },
+                            400: { description: "No valid recipients, too many recipients (>500) or media could not be fetched" },
                             401: { $ref: "#/components/responses/Unauthorized" },
                             403: { $ref: "#/components/responses/Forbidden" },
                             503: { $ref: "#/components/responses/SessionNotReady" },
                             500: { description: "Failed to start broadcast" }
+                        }
+                    },
+                    get: {
+                        tags: ["Messaging"],
+                        summary: "Get broadcast safety limits",
+                        description: "Returns the server-side limits (min/max delay, batch size, cooldown, max recipients) the dashboard mirrors.",
+                        parameters: [
+                            { name: "sessionId", in: "path", required: true, schema: { type: "string" } }
+                        ],
+                        responses: {
+                            200: { description: "Limits object" },
+                            401: { $ref: "#/components/responses/Unauthorized" }
+                        }
+                    }
+                },
+                "/messages/{sessionId}/broadcast/{broadcastId}/cancel": {
+                    post: {
+                        tags: ["Messaging"],
+                        summary: "Cancel a running broadcast",
+                        description: "Stops the broadcast after the message currently being sent. Remaining recipients are marked failed with 'Cancelled by user' and the log status becomes 'cancelled'.",
+                        parameters: [
+                            { name: "sessionId", in: "path", required: true, schema: { type: "string" } },
+                            { name: "broadcastId", in: "path", required: true, schema: { type: "string" } }
+                        ],
+                        responses: {
+                            200: { description: "Cancellation requested" },
+                            401: { $ref: "#/components/responses/Unauthorized" },
+                            403: { $ref: "#/components/responses/Forbidden" },
+                            404: { description: "Broadcast not found" },
+                            409: { description: "Broadcast is not running" }
                         }
                     }
                 },

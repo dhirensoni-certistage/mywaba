@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
+import { invalidateWebhookCache } from "@/lib/webhook";
 
 export async function PUT(
     request: NextRequest,
@@ -51,6 +52,7 @@ export async function PUT(
             return NextResponse.json({ status: false, message: "Webhook not found", error: "Webhook not found" }, { status: 404 });
         }
 
+        invalidateWebhookCache();
         const webhook = await prisma.webhook.update({
             where: { id },
             data: {
@@ -114,6 +116,7 @@ export async function DELETE(
             return NextResponse.json({ status: false, message: "Webhook not found", error: "Webhook not found" }, { status: 404 });
         }
 
+        invalidateWebhookCache();
         await prisma.webhook.delete({ where: { id } });
 
         return NextResponse.json({ status: true, message: "Operation successful" });

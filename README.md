@@ -54,7 +54,7 @@ graph LR
 - **📱 Multi-Session Management**: Connect and manage unlimited WhatsApp accounts simultaneously via simple QR code scans.
 - **⚡ Pro WhatsApp Engine**: Powered by `@whiskeysockets/baileys` for high-speed, stable, and secure WebSocket connections.
 - **📅 Advanced Scheduler**: Precise message planning with **Media Support** (Images, Video, Docs).
-- **📢 Safe Broadcast**: Built-in anti-ban mechanisms with randomized delays (10-30s) and batch processing.
+- **📢 Safe Broadcast**: Built-in anti-ban engine — number validation, 3s minimum delay with random jitter (8s default), typing simulation, batch cooldowns, auto-abort on disconnect, and one-click cancel.
 - **🤖 Smart Auto-Reply**: Keywords matching with **Context Support** (Group/Private/All) and **Media Attachments**.
 - **🛡️ Granular Access Control**: Full **Whitelist** & **Blacklist** support for both Bot Commands and Auto Replies.
 - **🔗 Enterprise Webhooks**: Robust real-time event forwarding for messages, connections, status changes, and group updates.

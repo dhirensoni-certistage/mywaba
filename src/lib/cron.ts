@@ -3,102 +3,141 @@ import cronParser from "cron-parser";
 import { prisma } from "@/lib/prisma";
 import { waManager } from "@/modules/whatsapp/manager";
 import { logger } from "./logger";
-export function initScheduler() {
-    // Run every minute
-    cron.schedule("* * * * *", async () => {
-        try {
-            const now = new Date();
-            
-            // Fetch pending messages due for sending
-            const pendingMessages = await prisma.scheduledMessage.findMany({
-                where: {
-                    status: "PENDING",
-                    sendAt: {
-                        lte: now
-                    }
-                },
-                include: {
-                    session: true
-                }
-            });
 
-            if (pendingMessages.length === 0) return;
+/**
+ * Scheduled-message runner.
+ *
+ * This is the ONLY scheduler. Previously a second poller (src/modules/whatsapp/scheduler.ts,
+ * every 30s) ran alongside this one, so every due message was queried twice a minute and could
+ * be sent twice when both pollers picked it up before either marked it SENT.
+ *
+ * Each message is now claimed atomically (PENDING -> SENDING) before sending, and a tick that
+ * is still running when the next one fires is skipped.
+ */
 
-            // Only log if we're actually processing things to reduce noise
-            logger.info("Cron", `Found ${pendingMessages.length} messages to send`);
+let tickRunning = false;
 
-            for (const msg of pendingMessages) {
-                const instance = waManager.getInstance(msg.session.sessionId);
+async function resolveTimezone(): Promise<string> {
+    try {
+        const cfg = await prisma.systemConfig.findUnique({ where: { id: "default" }, select: { timezone: true } });
+        if (cfg?.timezone) return cfg.timezone;
+    } catch { /* ignore */ }
+    return process.env.TZ || "Asia/Kolkata";
+}
 
-                if (!instance || !instance.socket) {
-                    logger.warn("Cron", `Session ${msg.session.sessionId} not connected. Skipping.`);
-                    // Optionally mark as FAILED or retry later
-                    // keeping PENDING will define behavior (retry next minute)
-                    // But if session is dead for long time, it piles up.
-                    // Let's keep it PENDING for now.
-                    continue;
-                }
+function toAbsoluteUrl(url: string): string {
+    if (url.startsWith("/")) {
+        const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3030}`;
+        return `${baseUrl.replace(/\/$/, "")}${url}`;
+    }
+    return url;
+}
 
-                try {
-                    logger.info("Cron", `Sending to ${msg.jid}`);
-                    
-                    if (msg.mediaUrl) {
-                        const type = msg.mediaType || "document";
-                        let payload: any = {};
-                        if (msg.content) payload.caption = msg.content;
-                        
-                        if (type === "image") {
-                            payload.image = { url: msg.mediaUrl };
-                        } else if (type === "video") {
-                            payload.video = { url: msg.mediaUrl };
-                        } else if (type === "audio") {
-                            payload = { audio: { url: msg.mediaUrl } };
-                        } else {
-                            payload.document = { url: msg.mediaUrl };
-                            payload.mimetype = "application/octet-stream";
-                            payload.fileName = msg.mediaUrl.split('/').pop() || "file";
-                        }
-                        await instance.socket.sendMessage(msg.jid, payload);
-                    } else {
-                        await instance.socket.sendMessage(msg.jid, { text: msg.content || "" });
-                    }
+async function buildContent(msg: { content: string | null; mediaUrl: string | null; mediaType: string | null }) {
+    if (!msg.mediaUrl) {
+        return { text: msg.content || "" };
+    }
 
-                    // Update status or compute next sendAt if recurring
-                    if (msg.cronExpression) {
-                        const interval = cronParser.parse(msg.cronExpression, { tz: "Asia/Jakarta" });
-                        const nextDate = interval.next().toDate();
-                        await prisma.scheduledMessage.update({
-                            where: { id: msg.id },
-                            data: { sendAt: nextDate } // Keep status as PENDING
-                        });
-                    } else {
-                        await prisma.scheduledMessage.update({
-                            where: { id: msg.id },
-                            data: { status: "SENT" }
-                        });
-                    }
+    const url = toAbsoluteUrl(msg.mediaUrl);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to fetch media from URL: ${res.status} ${res.statusText}`);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const contentType = res.headers.get("content-type")?.split(";")[0]?.trim() || undefined;
+    const fileName = decodeURIComponent(url.split("/").pop() || "file").split("?")[0] || "file";
+    const type = (msg.mediaType || "image").toLowerCase();
+    const caption = msg.content || "";
 
-                } catch (error) {
-                    logger.error("Cron", `Check failed for ${msg.id}`, error);
-                    if (!msg.cronExpression) {
-                        await prisma.scheduledMessage.update({
-                            where: { id: msg.id },
-                            data: { status: "FAILED" } // Failed to send
-                        });
-                    } else {
-                        const interval = cronParser.parse(msg.cronExpression, { tz: "Asia/Jakarta" });
-                        await prisma.scheduledMessage.update({
-                            where: { id: msg.id },
-                            data: { sendAt: interval.next().toDate() }
-                        });
-                    }
-                }
+    if (type === "video") return { video: buffer, caption, mimetype: contentType || "video/mp4" };
+    if (type === "audio") return { audio: buffer, mimetype: contentType || "audio/mp4" };
+    if (type === "document") return { document: buffer, caption, mimetype: contentType || "application/octet-stream", fileName };
+    return { image: buffer, caption };
+}
+
+export async function runSchedulerTick() {
+    if (tickRunning) {
+        logger.debug("Cron", "Previous scheduler tick still running, skipping");
+        return;
+    }
+    tickRunning = true;
+    try {
+        const now = new Date();
+
+        const pendingMessages = await prisma.scheduledMessage.findMany({
+            where: { status: "PENDING", sendAt: { lte: now } },
+            include: { session: { select: { sessionId: true } } }
+        });
+
+        if (pendingMessages.length === 0) return;
+
+        logger.info("Cron", `Found ${pendingMessages.length} scheduled message(s) due`);
+        const timezone = await resolveTimezone();
+
+        for (const msg of pendingMessages) {
+            const instance = waManager.getInstance(msg.session.sessionId);
+
+            if (!instance?.socket || instance.status !== "CONNECTED") {
+                // Keep PENDING so it retries on the next tick once the session is back.
+                logger.warn("Cron", `Session ${msg.session.sessionId} not connected. Scheduled msg ${msg.id} deferred.`);
+                continue;
             }
 
-        } catch (error) {
-            logger.error("Cron", "Scheduler error:", error);
+            // Atomic claim — guarantees a single sender even if two ticks overlap.
+            const claimed = await prisma.scheduledMessage.updateMany({
+                where: { id: msg.id, status: "PENDING" },
+                data: { status: "SENDING" }
+            });
+            if (claimed.count !== 1) continue;
+
+            const nextRun = () => {
+                if (!msg.cronExpression) return null;
+                try {
+                    return cronParser.parse(msg.cronExpression, { tz: timezone }).next().toDate();
+                } catch (e) {
+                    logger.error("Cron", `Invalid cron expression on ${msg.id}: ${msg.cronExpression}`);
+                    return null;
+                }
+            };
+
+            try {
+                const content = await buildContent(msg);
+                await instance.socket.sendMessage(msg.jid, content as any);
+                logger.success("Cron", `Scheduled msg ${msg.id} sent to ${msg.jid}`);
+
+                const next = nextRun();
+                await prisma.scheduledMessage.update({
+                    where: { id: msg.id },
+                    data: next ? { status: "PENDING", sendAt: next } : { status: "SENT" }
+                });
+            } catch (error) {
+                logger.error("Cron", `Failed to send scheduled msg ${msg.id}`, error);
+                const next = nextRun();
+                await prisma.scheduledMessage.update({
+                    where: { id: msg.id },
+                    data: next ? { status: "PENDING", sendAt: next } : { status: "FAILED" }
+                }).catch(() => {});
+            }
         }
-    });
-    
+    } catch (error) {
+        logger.error("Cron", "Scheduler error:", error);
+    } finally {
+        tickRunning = false;
+    }
+}
+
+let initialized = false;
+
+export function initScheduler() {
+    if (initialized) return;
+    initialized = true;
+
+    // Anything left in SENDING from a crash mid-send goes back to PENDING so it is retried.
+    prisma.scheduledMessage.updateMany({
+        where: { status: "SENDING" },
+        data: { status: "PENDING" }
+    }).catch(() => {});
+
+    // Run every minute
+    cron.schedule("* * * * *", () => { runSchedulerTick(); });
+
     logger.info("Cron", "Scheduler initialized");
 }

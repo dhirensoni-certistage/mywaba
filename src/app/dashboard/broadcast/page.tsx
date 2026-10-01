@@ -1,32 +1,53 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Progress } from "@/components/ui/progress";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
-import { RefreshCw, Send, CheckCircle2, XCircle, Radio, Clock, AlertTriangle, History, Eye, Calendar } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { RefreshCw, Send, CheckCircle2, XCircle, Radio, Clock, AlertTriangle, History, Eye, Calendar, Ban, ShieldCheck, Info } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/components/dashboard/session-provider";
 import { SessionGuard } from "@/components/dashboard/session-guard";
 import { useSocket } from "@/components/chat/socket-context";
 import { MediaUploadInput } from "@/components/dashboard/media-upload-input";
 
+type BroadcastStatus = "running" | "completed" | "cancelled" | "failed";
+
 interface BroadcastProgress {
     broadcastId: string;
-    status: "running" | "completed";
+    status: BroadcastStatus;
     total: number;
     sent: number;
     failed: number;
+    skipped?: number;
     current?: string | null;
     progress?: number;
+    note?: string | null;
+    error?: string | null;
     errors?: { jid: string; error: string }[];
     startedAt?: string;
     completedAt?: string;
 }
+
+// Mirrors BROADCAST_LIMITS on the server (src/modules/whatsapp/broadcast.ts)
+const LIMITS = {
+    MIN_DELAY_MS: 3000,
+    DEFAULT_DELAY_MS: 8000,
+    MAX_DELAY_MS: 120000,
+    DEFAULT_BATCH_SIZE: 20,
+    MIN_BATCH_SIZE: 5,
+    MAX_BATCH_SIZE: 100,
+    DEFAULT_BATCH_PAUSE_MS: 60000,
+    MIN_BATCH_PAUSE_MS: 15000,
+    MAX_BATCH_PAUSE_MS: 600000,
+    MAX_RECIPIENTS: 500,
+};
 
 interface BroadcastLog {
     id: string;
@@ -37,6 +58,7 @@ interface BroadcastLog {
     failed: number;
     status: string;
     delay: number;
+    error?: string | null;
     startedAt: string;
     completedAt: string | null;
     _count?: { recipients: number };
@@ -57,8 +79,13 @@ export default function BroadcastPage() {
     const [message, setMessage] = useState("");
     const [mediaUrl, setMediaUrl] = useState("");
     const [mediaType, setMediaType] = useState("image");
-    const [delay, setDelay] = useState([2000]);
+    const [delay, setDelay] = useState([LIMITS.DEFAULT_DELAY_MS]);
+    const [batchSize, setBatchSize] = useState(LIMITS.DEFAULT_BATCH_SIZE);
+    const [batchPauseSec, setBatchPauseSec] = useState(LIMITS.DEFAULT_BATCH_PAUSE_MS / 1000);
+    const [simulateTyping, setSimulateTyping] = useState(true);
+    const [validateNumbers, setValidateNumbers] = useState(true);
     const [loading, setLoading] = useState(false);
+    const [cancelling, setCancelling] = useState(false);
     const [broadcastProgress, setBroadcastProgress] = useState<BroadcastProgress | null>(null);
     const [activeTab, setActiveTab] = useState<"new" | "history">("new");
 
@@ -81,15 +108,22 @@ export default function BroadcastPage() {
         socket.on("connect", onConnect);
 
         const handler = (data: BroadcastProgress) => {
-            setBroadcastProgress(data);
-            if (data.status === "completed") {
+            setBroadcastProgress(prev => ({ ...(prev && prev.broadcastId === data.broadcastId ? prev : {}), ...data }));
+            if (data.status !== "running") {
                 setLoading(false);
+                setCancelling(false);
                 // Refresh history after completion
                 fetchHistory();
-                if (data.failed === 0) {
-                    toast.success(`Broadcast complete! ${data.sent} sent.`);
+                if (data.status === "completed") {
+                    if (data.failed === 0) {
+                        toast.success(`Broadcast complete! ${data.sent} sent.`);
+                    } else {
+                        toast.warning(`Broadcast complete. ${data.sent} sent, ${data.failed} failed.`);
+                    }
+                } else if (data.status === "cancelled") {
+                    toast.info(`Broadcast cancelled. ${data.sent} sent before stopping.`);
                 } else {
-                    toast.warning(`Broadcast complete. ${data.sent} sent, ${data.failed} failed.`);
+                    toast.error(data.error || `Broadcast stopped. ${data.sent} sent, ${data.failed} failed.`);
                 }
             }
         };
@@ -147,13 +181,16 @@ export default function BroadcastPage() {
         setBroadcastProgress(null);
 
         try {
-            const recipients = contacts.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).map(s => {
-                if (!s.includes('@')) return `${s}@s.whatsapp.net`;
-                return s;
-            });
+            const recipients = contacts.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
 
             if (recipients.length === 0) {
                 toast.error("No recipients specified");
+                setLoading(false);
+                return;
+            }
+
+            if (recipients.length > LIMITS.MAX_RECIPIENTS) {
+                toast.error(`Maximum ${LIMITS.MAX_RECIPIENTS} recipients per broadcast. Split the list and spread it over the day.`);
                 setLoading(false);
                 return;
             }
@@ -166,14 +203,22 @@ export default function BroadcastPage() {
                     message,
                     mediaUrl: mediaUrl.trim() || undefined,
                     mediaType: mediaUrl.trim() ? (mediaType || "image") : undefined,
-                    delay: delay[0]
+                    delay: delay[0],
+                    batchSize,
+                    batchPauseMs: batchPauseSec * 1000,
+                    simulateTyping,
+                    validateNumbers
                 })
             });
 
             const data = await res.json();
 
             if (res.ok) {
-                toast.info(`Broadcast started for ${recipients.length} recipients...`);
+                const invalid: string[] = data?.data?.invalidRecipients || [];
+                toast.info(`Broadcast started for ${data?.data?.total ?? recipients.length} recipients...`);
+                if (invalid.length > 0) {
+                    toast.warning(`${invalid.length} entr${invalid.length === 1 ? "y was" : "ies were"} ignored as invalid numbers: ${invalid.slice(0, 3).join(", ")}${invalid.length > 3 ? "…" : ""}`);
+                }
             } else {
                 toast.error(data.message || "Failed to start broadcast");
                 setLoading(false);
@@ -185,7 +230,53 @@ export default function BroadcastPage() {
         }
     };
 
-    const recipientCount = contacts.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).length;
+    const handleCancel = async (broadcastId?: string) => {
+        const id = broadcastId || broadcastProgress?.broadcastId;
+        if (!sessionId || !id) return;
+        setCancelling(true);
+        try {
+            const res = await fetch(`/api/messages/${sessionId}/broadcast/${id}/cancel`, { method: "POST" });
+            const data = await res.json();
+            if (res.ok) {
+                toast.info(data.message || "Cancellation requested");
+                fetchHistory();
+            } else {
+                toast.error(data.message || "Failed to cancel broadcast");
+                setCancelling(false);
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error("Failed to cancel broadcast");
+            setCancelling(false);
+        }
+    };
+
+    const recipientCount = new Set(contacts.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean)).size;
+
+    // Rough runtime estimate: avg jitter is +30%, plus one cooldown per full batch.
+    const estimateSeconds = (() => {
+        if (recipientCount === 0) return 0;
+        const perMessage = delay[0] * 1.3 / 1000 + (simulateTyping ? 2.5 : 0);
+        const batches = Math.max(0, Math.ceil(recipientCount / Math.max(batchSize, 1)) - 1);
+        return Math.round(recipientCount * perMessage + batches * batchPauseSec * 1.25);
+    })();
+    const formatDuration = (sec: number) => {
+        if (sec < 60) return `${sec}s`;
+        const m = Math.floor(sec / 60);
+        if (m < 60) return `${m} min`;
+        return `${Math.floor(m / 60)}h ${m % 60}m`;
+    };
+
+    const statusIcon = (status: string, failed: number, size = "h-8 w-8") => {
+        if (status === "completed") {
+            return failed === 0
+                ? <CheckCircle2 className={`${size} text-green-500`} />
+                : <AlertTriangle className={`${size} text-yellow-500`} />;
+        }
+        if (status === "cancelled") return <Ban className={`${size} text-slate-400`} />;
+        if (status === "failed") return <XCircle className={`${size} text-red-500`} />;
+        return <Radio className={`${size} text-blue-500 animate-pulse`} />;
+    };
     const formatJid = (jid: string) => {
         if (!jid) return "-";
         return jid.replace("@s.whatsapp.net", "").replace("@g.us", " (Group)");
@@ -283,18 +374,68 @@ export default function BroadcastPage() {
 
                                     <div className="space-y-4 pt-2">
                                         <div className="space-y-2">
-                                            <Label>Delay: {(delay[0] / 1000).toFixed(1)}s</Label>
+                                            <Label>Delay between messages: {(delay[0] / 1000).toFixed(0)}s</Label>
                                             <Slider
-                                                defaultValue={[2000]}
-                                                min={1000}
-                                                max={15000}
-                                                step={500}
+                                                min={LIMITS.MIN_DELAY_MS}
+                                                max={60000}
+                                                step={1000}
                                                 value={delay}
                                                 onValueChange={setDelay}
                                                 disabled={loading}
                                             />
-                                            <p className="text-xs text-muted-foreground">Delay between messages (+ random jitter to protect number reputation).</p>
+                                            <p className="text-xs text-muted-foreground">
+                                                Random jitter of up to +60% is added on top. Minimum is {LIMITS.MIN_DELAY_MS / 1000}s; 8–15s is recommended for cold contacts.
+                                            </p>
                                         </div>
+
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-1.5">
+                                                <Label className="text-xs">Messages per batch</Label>
+                                                <Input
+                                                    type="number"
+                                                    min={LIMITS.MIN_BATCH_SIZE}
+                                                    max={LIMITS.MAX_BATCH_SIZE}
+                                                    value={batchSize}
+                                                    onChange={e => setBatchSize(Math.min(LIMITS.MAX_BATCH_SIZE, Math.max(LIMITS.MIN_BATCH_SIZE, parseInt(e.target.value) || LIMITS.DEFAULT_BATCH_SIZE)))}
+                                                    disabled={loading}
+                                                />
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <Label className="text-xs">Pause between batches (s)</Label>
+                                                <Input
+                                                    type="number"
+                                                    min={LIMITS.MIN_BATCH_PAUSE_MS / 1000}
+                                                    max={LIMITS.MAX_BATCH_PAUSE_MS / 1000}
+                                                    value={batchPauseSec}
+                                                    onChange={e => setBatchPauseSec(Math.min(LIMITS.MAX_BATCH_PAUSE_MS / 1000, Math.max(LIMITS.MIN_BATCH_PAUSE_MS / 1000, parseInt(e.target.value) || LIMITS.DEFAULT_BATCH_PAUSE_MS / 1000)))}
+                                                    disabled={loading}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <Label className="text-xs">Validate numbers first</Label>
+                                                    <p className="text-[11px] text-muted-foreground">Skip numbers that are not on WhatsApp. Sending to dead numbers is a strong spam signal.</p>
+                                                </div>
+                                                <Switch checked={validateNumbers} onCheckedChange={setValidateNumbers} disabled={loading} />
+                                            </div>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <Label className="text-xs">Simulate typing</Label>
+                                                    <p className="text-[11px] text-muted-foreground">Show &quot;typing…&quot; for a moment before each message.</p>
+                                                </div>
+                                                <Switch checked={simulateTyping} onCheckedChange={setSimulateTyping} disabled={loading} />
+                                            </div>
+                                        </div>
+
+                                        {recipientCount > 0 && (
+                                            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                                <Clock className="h-3.5 w-3.5" />
+                                                Estimated time for {recipientCount} recipients: ~{formatDuration(estimateSeconds)}
+                                            </p>
+                                        )}
 
                                         <Button
                                             className="w-full"
@@ -309,24 +450,61 @@ export default function BroadcastPage() {
                             </Card>
                         </div>
 
+                        {/* Safety guidance */}
+                        <Card className="border-dashed">
+                            <CardContent className="pt-5">
+                                <div className="flex gap-3">
+                                    <ShieldCheck className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+                                    <div className="text-xs text-muted-foreground space-y-1">
+                                        <p className="font-medium text-foreground text-sm">Protect your number</p>
+                                        <p>WhatsApp logs out (and eventually bans) numbers that send identical messages quickly to people who did not opt in. Keep a new number under ~50 cold recipients/day for the first weeks, stay under ~200/day on a warmed-up number, personalise the text, and message only people who expect to hear from you. If a broadcast is logged out mid-way, stop for 24h before trying again.</p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+
                         {/* Live Progress */}
                         {broadcastProgress && (
                             <Card className={`border-2 transition-colors ${
                                 broadcastProgress.status === "completed"
                                     ? (broadcastProgress.failed === 0 ? "border-green-500/30 bg-green-50/30 dark:bg-green-950/10" : "border-yellow-500/30 bg-yellow-50/30 dark:bg-yellow-950/10")
-                                    : "border-blue-500/30 bg-blue-50/30 dark:bg-blue-950/10"
+                                    : broadcastProgress.status === "failed"
+                                        ? "border-red-500/30 bg-red-50/30 dark:bg-red-950/10"
+                                        : broadcastProgress.status === "cancelled"
+                                            ? "border-slate-400/30 bg-slate-50/30 dark:bg-slate-950/10"
+                                            : "border-blue-500/30 bg-blue-50/30 dark:bg-blue-950/10"
                             }`}>
                                 <CardHeader className="pb-3">
-                                    <CardTitle className="flex items-center gap-2 text-lg">
-                                        {broadcastProgress.status === "running" ? (
-                                            <><Radio className="h-5 w-5 text-blue-500 animate-pulse" /><span>Broadcast In Progress</span></>
-                                        ) : broadcastProgress.failed === 0 ? (
-                                            <><CheckCircle2 className="h-5 w-5 text-green-500" /><span>Broadcast Completed</span></>
-                                        ) : (
-                                            <><AlertTriangle className="h-5 w-5 text-yellow-500" /><span>Broadcast Completed with Errors</span></>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                            <CardTitle className="flex items-center gap-2 text-lg">
+                                                {broadcastProgress.status === "running" ? (
+                                                    <><Radio className="h-5 w-5 text-blue-500 animate-pulse" /><span>Broadcast In Progress</span></>
+                                                ) : broadcastProgress.status === "cancelled" ? (
+                                                    <><Ban className="h-5 w-5 text-slate-500" /><span>Broadcast Cancelled</span></>
+                                                ) : broadcastProgress.status === "failed" ? (
+                                                    <><XCircle className="h-5 w-5 text-red-500" /><span>Broadcast Stopped</span></>
+                                                ) : broadcastProgress.failed === 0 ? (
+                                                    <><CheckCircle2 className="h-5 w-5 text-green-500" /><span>Broadcast Completed</span></>
+                                                ) : (
+                                                    <><AlertTriangle className="h-5 w-5 text-yellow-500" /><span>Broadcast Completed with Errors</span></>
+                                                )}
+                                            </CardTitle>
+                                            <CardDescription>ID: {broadcastProgress.broadcastId}</CardDescription>
+                                        </div>
+                                        {broadcastProgress.status === "running" && (
+                                            <Button variant="destructive" size="sm" onClick={() => handleCancel()} disabled={cancelling}>
+                                                {cancelling ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <Ban className="h-4 w-4 mr-1" />}
+                                                {cancelling ? "Stopping…" : "Stop"}
+                                            </Button>
                                         )}
-                                    </CardTitle>
-                                    <CardDescription>ID: {broadcastProgress.broadcastId}</CardDescription>
+                                    </div>
+                                    {broadcastProgress.error && (
+                                        <div className="mt-2 flex items-start gap-2 text-sm text-red-600 bg-red-500/10 rounded-md px-3 py-2">
+                                            <Info className="h-4 w-4 mt-0.5 shrink-0" />
+                                            <span>{broadcastProgress.error}</span>
+                                        </div>
+                                    )}
                                 </CardHeader>
                                 <CardContent className="space-y-4">
                                     <div className="space-y-2">
@@ -362,15 +540,21 @@ export default function BroadcastPage() {
                                         </div>
                                     </div>
 
-                                    {broadcastProgress.status === "running" && broadcastProgress.current && (
+                                    {broadcastProgress.status === "running" && (broadcastProgress.note || broadcastProgress.current) && (
                                         <div className="flex items-center gap-2 text-sm px-3 py-2 bg-muted/50 rounded-lg">
                                             <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-500" />
-                                            <span className="text-muted-foreground">Now sending:</span>
-                                            <span className="font-mono font-medium">{formatJid(broadcastProgress.current)}</span>
+                                            {broadcastProgress.note ? (
+                                                <span className="text-muted-foreground">{broadcastProgress.note}</span>
+                                            ) : (
+                                                <>
+                                                    <span className="text-muted-foreground">Now sending:</span>
+                                                    <span className="font-mono font-medium">{formatJid(broadcastProgress.current!)}</span>
+                                                </>
+                                            )}
                                         </div>
                                     )}
 
-                                    {broadcastProgress.status === "completed" && broadcastProgress.errors && broadcastProgress.errors.length > 0 && (
+                                    {broadcastProgress.status !== "running" && broadcastProgress.errors && broadcastProgress.errors.length > 0 && (
                                         <div className="space-y-2">
                                             <h4 className="text-sm font-semibold text-red-600 flex items-center gap-1.5">
                                                 <XCircle className="h-4 w-4" /> Failed ({broadcastProgress.errors.length})
@@ -417,18 +601,15 @@ export default function BroadcastPage() {
                                         >
                                             {/* Status icon */}
                                             <div className="shrink-0">
-                                                {log.status === "completed" ? (
-                                                    log.failed === 0
-                                                        ? <CheckCircle2 className="h-8 w-8 text-green-500" />
-                                                        : <AlertTriangle className="h-8 w-8 text-yellow-500" />
-                                                ) : (
-                                                    <Radio className="h-8 w-8 text-blue-500 animate-pulse" />
-                                                )}
+                                                {statusIcon(log.status, log.failed)}
                                             </div>
 
                                             {/* Info */}
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-sm font-medium truncate">{log.message}</p>
+                                                {log.error && (
+                                                    <p className="text-xs text-red-500 truncate mt-0.5" title={log.error}>{log.error}</p>
+                                                )}
                                                 <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
                                                     <span className="flex items-center gap-1">
                                                         <CheckCircle2 className="h-3 w-3 text-green-500" /> {log.sent}
@@ -442,7 +623,12 @@ export default function BroadcastPage() {
                                                 </div>
                                             </div>
 
-                                            {/* View button */}
+                                            {/* Actions */}
+                                            {log.status === "running" && (
+                                                <Button variant="ghost" size="sm" className="shrink-0 text-red-500" onClick={() => handleCancel(log.id)}>
+                                                    <Ban className="h-4 w-4 mr-1" /> Stop
+                                                </Button>
+                                            )}
                                             <Button variant="ghost" size="sm" className="shrink-0" onClick={() => openDetail(log)}>
                                                 <Eye className="h-4 w-4 mr-1" /> Detail
                                             </Button>
@@ -459,11 +645,11 @@ export default function BroadcastPage() {
                     <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
                         <DialogHeader>
                             <DialogTitle className="flex items-center gap-2">
-                                {selectedLog?.status === "completed"
-                                    ? <CheckCircle2 className="h-5 w-5 text-green-500" />
-                                    : <Radio className="h-5 w-5 text-blue-500 animate-pulse" />
-                                }
+                                {selectedLog ? statusIcon(selectedLog.status, selectedLog.failed, "h-5 w-5") : null}
                                 Broadcast Detail
+                                {selectedLog && selectedLog.status !== "completed" && (
+                                    <span className="text-xs font-normal uppercase tracking-wide px-2 py-0.5 rounded bg-muted">{selectedLog.status}</span>
+                                )}
                             </DialogTitle>
                         </DialogHeader>
 
@@ -488,6 +674,13 @@ export default function BroadcastPage() {
                                         <div className="text-xs text-muted-foreground">Total</div>
                                     </div>
                                 </div>
+
+                                {selectedLog.error && (
+                                    <div className="flex items-start gap-2 text-sm text-red-600 bg-red-500/10 rounded-md px-3 py-2">
+                                        <Info className="h-4 w-4 mt-0.5 shrink-0" />
+                                        <span>{selectedLog.error}</span>
+                                    </div>
+                                )}
 
                                 {/* Message */}
                                 <div className="bg-muted/30 rounded-lg p-3">

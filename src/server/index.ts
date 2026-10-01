@@ -49,12 +49,12 @@ app.prepare().then(() => {
   // Optional: Global instance for Baileys to emit events
   (global as any).io = io;
 
-  // Initialize WhatsApp Manager
+  // Initialize WhatsApp Manager (the message scheduler is started from its constructor)
   waManager.setup(io);
   waManager.loadSessions();
 
-  // Start Scheduler
-  import("../modules/whatsapp/scheduler").then(m => m.startScheduler());
+  // Close out broadcasts that were interrupted by the previous shutdown
+  import("../modules/whatsapp/broadcast").then(m => m.recoverStaleBroadcasts());
 
   // Cloudflare 520 Fix: increase keep-alive timeout so Node doesn't kill idle connections that Cloudflare expects to reuse
   // See: https://github.com/vercel/next.js/issues/48962

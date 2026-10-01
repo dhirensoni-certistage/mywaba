@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { getAuthenticatedUserForAction } from "@/lib/server-action-auth";
 import { ChatInterface } from "@/components/chat/chat-interface";
 import { ChatLayoutClient } from "@/components/chat/chat-layout-client";
 import { cookies } from "next/headers";
@@ -11,9 +11,9 @@ export default async function ChatWithJidPage({
     params: Promise<{ jid: string }>;
 }) {
     const { jid: rawJid } = await params;
-    const session = await auth();
+    const user = await getAuthenticatedUserForAction();
 
-    if (!session?.user?.id) return <div>Unauthorized</div>;
+    if (!user) return <div>Unauthorized</div>;
 
     let clean = rawJid.replace(/\D/g, '');
     if (clean.startsWith('0')) clean = '62' + clean.substring(1);
@@ -24,7 +24,7 @@ export default async function ChatWithJidPage({
     let validSessionId: string | null = null;
 
     if (sessionId) {
-        const hasAccess = await canAccessSession(session.user.id, session.user.role, sessionId);
+        const hasAccess = await canAccessSession(user.id, user.role, sessionId);
         if (hasAccess) {
             validSessionId = sessionId;
         }

@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
+import { invalidateWebhookCache } from "@/lib/webhook";
 
 export async function GET(
     request: NextRequest,
@@ -84,6 +85,7 @@ export async function POST(
             return NextResponse.json({ status: false, message: "Session not found", error: "Session not found" }, { status: 404 });
         }
 
+        invalidateWebhookCache();
         const webhook = await prisma.webhook.create({
             data: {
                 userId: user.id,

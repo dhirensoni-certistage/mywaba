@@ -71,7 +71,7 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
                 // Execute Bot Commands (Only for Notify / New Messages)
                 if (type === 'notify' && savedMessage) {
                     // Run in background, don't await strictly to not block saving
-                    handleBotCommand(sock, sessionId, msg).catch(e => logger.error("Bot", "Bot Handler Error", e));
+                    handleBotCommand(sock, sessionId, msg, config ?? null).catch(e => logger.error("Bot", "Bot Handler Error", e));
                 }
             } catch (error) {
                 logger.error("Store", "Error saving message", error);
