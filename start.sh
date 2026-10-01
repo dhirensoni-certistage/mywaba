@@ -71,13 +71,27 @@ if [ $PORT_IN_USE -eq 0 ] && command -v netstat &> /dev/null; then
     fi
 fi
 
-# If port is occupied, fail early
-if [ $PORT_IN_USE -eq 1 ]; then
-    echo -e "${RED}❌ Error: Port $PORT is already in use by another application!${NC}"
-    echo -e "${YELLOW}Please change the PORT value in your .env file to a free port (e.g. 3030) before starting.${NC}"
-    exit 1
+# Name of the PM2 process (see ecosystem.config.js). "wa-akg" is the legacy name from older installs.
+PM2_APP=""
+if command -v pm2 &> /dev/null; then
+    for candidate in waba wa-akg; do
+        if pm2 describe "$candidate" &> /dev/null; then PM2_APP="$candidate"; break; fi
+    done
 fi
-echo -e "${GREEN}✓ Port $PORT is available.${NC}"
+
+# If the port is occupied by something else, fail early. If it is our own PM2 process this is a
+# redeploy: carry on, the process is re-created in step 6.
+if [ $PORT_IN_USE -eq 1 ]; then
+    if [ -n "$PM2_APP" ]; then
+        echo -e "${YELLOW}ℹ Port $PORT is in use by the running PM2 process '$PM2_APP' — this is an update, continuing.${NC}"
+    else
+        echo -e "${RED}❌ Error: Port $PORT is already in use by another application!${NC}"
+        echo -e "${YELLOW}Please change the PORT value in your .env file to a free port (e.g. 3030) before starting.${NC}"
+        exit 1
+    fi
+else
+    echo -e "${GREEN}✓ Port $PORT is available.${NC}"
+fi
 
 # Step 3: Install dependencies
 echo -e "\n${BLUE}[3/6] Installing project dependencies...${NC}"
@@ -138,11 +152,11 @@ else
     echo -e "${RED}⚠️ Warning: Could not verify admin status (database connection issue). Skipping admin setup.${NC}"
 fi
 
-# Step 5: Build Next.js Production Assets
-echo -e "\n${BLUE}[5/6] Building Next.js production assets...${NC}"
+# Step 5: Build Next.js Production Assets + server bundle (dist/server/index.js)
+echo -e "\n${BLUE}[5/6] Building Next.js production assets and server bundle...${NC}"
 npm run build
-if [ $? -ne 0 ]; then
-    echo -e "${RED}❌ Error: Next.js build failed!${NC}"
+if [ $? -ne 0 ] || [ ! -f dist/server/index.js ]; then
+    echo -e "${RED}❌ Error: Build failed!${NC}"
     exit 1
 fi
 echo -e "${GREEN}✓ Production assets built successfully.${NC}"
@@ -156,14 +170,15 @@ if ! command -v pm2 &> /dev/null; then
     npm install -g pm2
 fi
 
-# Check if application is already running in PM2
-if pm2 show wa-akg &> /dev/null; then
-    echo -e "${YELLOW}🔄 Application 'wa-akg' is already running. Reloading to apply changes...${NC}"
-    pm2 reload wa-akg
-else
-    echo -e "${GREEN}🚀 Starting 'wa-akg' process using ecosystem.config.js...${NC}"
-    pm2 start ecosystem.config.js
+# Re-create the process from ecosystem.config.js. A plain `pm2 reload` keeps the script path and
+# interpreter from the first `pm2 start`, so changes to ecosystem.config.js (for example the move
+# from `npx tsx src/server/index.ts` to `node dist/server/index.js`) would never be applied.
+if [ -n "$PM2_APP" ]; then
+    echo -e "${YELLOW}🔄 Application '$PM2_APP' is already running. Re-creating it to apply changes...${NC}"
+    pm2 delete "$PM2_APP"
 fi
+echo -e "${GREEN}🚀 Starting 'waba' process using ecosystem.config.js...${NC}"
+pm2 start ecosystem.config.js
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ Error: Failed to start PM2 process!${NC}"
@@ -175,10 +190,10 @@ echo -e "${GREEN}       🎉 WA-AKG DEPLOYED SUCCESSFULLY! 🎉         ${NC}"
 echo -e "${GREEN}====================================================${NC}"
 echo -e "\n${BLUE}Useful PM2 Commands:${NC}"
 echo -e "  - View status:           ${YELLOW}pm2 status${NC}"
-echo -e "  - View real-time logs:   ${YELLOW}pm2 logs wa-akg${NC}"
+echo -e "  - View real-time logs:   ${YELLOW}pm2 logs waba${NC}"
 echo -e "  - Monitor resources:     ${YELLOW}pm2 monit${NC}"
-echo -e "  - Stop gateway service:  ${YELLOW}pm2 stop wa-akg${NC}"
-echo -e "  - Restart service:       ${YELLOW}pm2 restart wa-akg${NC}"
+echo -e "  - Stop gateway service:  ${YELLOW}pm2 stop waba${NC}"
+echo -e "  - Restart service:       ${YELLOW}pm2 restart waba${NC}"
 
 echo -e "\n${BLUE}Useful Project Script Commands:${NC}"
 echo -e "  - Run Dev Mode:          ${YELLOW}npm run dev${NC}"

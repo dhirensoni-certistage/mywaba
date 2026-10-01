@@ -1,3 +1,9 @@
+## [v1.6.6] - 2026-10-01
+
+### Fixed
+- **Idle CPU pinned at ~95% of a core in production**: the server was started with `npx tsx src/server/index.ts`, and tsx's ESM loader worker thread kept spinning on the VPS (Node 20) even with zero sessions. The custom server is now bundled at build time (`scripts/build-server.mjs`, esbuild, `node_modules` stay external) to `dist/server/index.js` and PM2 runs it with plain `node` (`ecosystem.config.js`, `npm start`). `npm run dev` still uses tsx; `npm run start:tsx` keeps the old behaviour as a fallback.
+- **`scripts/deploy.sh` / `start.sh` could not apply `ecosystem.config.js` changes**: PM2 keeps the script path from the first `pm2 start`, so a reload would have kept running the tsx entry. Both scripts now re-create the process when its script differs; `start.sh` no longer aborts on "port in use" when the port belongs to our own PM2 process, and uses the real process name (`waba`, `wa-akg` as legacy fallback).
+
 ## [v1.6.5] - 2026-10-01
 
 ### Fixed
