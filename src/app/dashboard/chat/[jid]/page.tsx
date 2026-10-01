@@ -5,6 +5,8 @@ import { cookies } from "next/headers";
 import { canAccessSession } from "@/lib/api-auth";
 import { SessionGuard } from "@/components/dashboard/session-guard";
 
+export const dynamic = "force-dynamic";
+
 export default async function ChatWithJidPage({
     params,
 }: {

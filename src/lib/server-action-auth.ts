@@ -22,7 +22,12 @@ export async function getAuthenticatedUserForAction() {
             }
         }
         return null;
-    } catch (error) {
+    } catch (error: any) {
+        // Next.js signals "this route must be dynamic" by throwing during static prerender.
+        // Never swallow that, or the page would be prerendered as "Unauthorized".
+        if (error?.digest === "DYNAMIC_SERVER_USAGE" || /Dynamic server usage/i.test(error?.message || "")) {
+            throw error;
+        }
         logger.error("Auth", "Error getting authenticated user for action:", error);
         return null;
     }
