@@ -330,6 +330,7 @@ model SystemConfig {
   // Downloaded chat media (data/media) older than this many days is deleted every night. 0 = keep forever.
   mediaRetentionDays   Int      @default(30)
   mediaLastCleanupAt   DateTime?
+  mediaLastCleanupResult Json?   // { deleted, orphansDeleted, freedBytes, messagesUpdated, retentionDays, trigger }
   
   updatedAt          DateTime @updatedAt
 }

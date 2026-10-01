@@ -126,24 +126,34 @@ export default function MediaPage() {
     const [loading, setLoading] = useState(true);
     const { data: authSession } = useSession();
     const isSuperAdmin = (authSession?.user as { role?: string } | undefined)?.role === "SUPERADMIN";
-    const [cleanup, setCleanup] = useState<{ retentionDays: number; lastCleanupAt: string | null; expiredCount: number; expiredBytes: number } | null>(null);
+    type CleanupStatus = {
+        retentionDays: number; lastCleanupAt: string | null;
+        lastResult: { deleted: number; orphansDeleted: number; freedBytes: number; trigger?: string } | null;
+        expiredCount: number; expiredBytes: number; orphanCount: number; orphanBytes: number;
+    };
+    const [cleanup, setCleanup] = useState<CleanupStatus | null>(null);
     const [cleaning, setCleaning] = useState(false);
+    const [cleanupDays, setCleanupDays] = useState<string>("");
 
     const fetchCleanupStatus = async () => {
         try {
             const res = await fetch("/api/media/cleanup");
             if (!res.ok) return;
             const json = await res.json();
-            if (json?.data) setCleanup(json.data);
+            if (json?.data) {
+                setCleanup(json.data);
+                setCleanupDays(prev => prev === "" ? String(json.data.retentionDays) : prev);
+            }
         } catch { /* superadmin only */ }
     };
 
     const runCleanupNow = async () => {
         setCleaning(true);
         try {
-            const res = await fetch("/api/media/cleanup", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+            const days = Math.max(0, parseInt(cleanupDays || "0", 10) || 0);
+            const res = await fetch("/api/media/cleanup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ retentionDays: days, includeOrphans: true }) });
             const json = await res.json();
-            if (res.ok && json.status) toast.success(json.message); else toast.error(json.message || "Clean-up failed");
+            if (res.ok && json.status) toast.success(json.message, { duration: 8000 }); else toast.error(json.message || "Clean-up failed");
             await Promise.all([fetchMedia(), fetchCleanupStatus()]);
         } catch {
             toast.error("Clean-up failed");
@@ -332,11 +342,16 @@ export default function MediaPage() {
                     <h1 className="text-xl font-bold text-foreground">Media Manager</h1>
                     <p className="text-sm text-muted-foreground mt-0.5">Manage downloaded media files</p>
                 </div>
-                <div className="flex gap-2 self-start">
-                    {isSuperAdmin && (
-                        <Button variant="outline" size="sm" className="gap-2" onClick={runCleanupNow} disabled={cleaning || !cleanup || cleanup.retentionDays <= 0} title={cleanup && cleanup.retentionDays <= 0 ? "Auto-cleanup is off (Settings → App Configuration)" : undefined}>
-                            <Timer className={`h-3.5 w-3.5 ${cleaning ? "animate-spin" : ""}`} /> Clean up now{cleanup && cleanup.expiredCount > 0 ? ` (${cleanup.expiredCount})` : ""}
-                        </Button>
+                <div className="flex flex-wrap gap-2 self-start items-center">
+                    {isSuperAdmin && cleanup && (
+                        <>
+                            <span className="text-xs text-muted-foreground">older than</span>
+                            <Input type="number" min={0} max={3650} className="h-8 w-20 text-xs" value={cleanupDays} onChange={e => setCleanupDays(e.target.value)} disabled={cleaning} />
+                            <span className="text-xs text-muted-foreground">days</span>
+                            <Button variant="outline" size="sm" className="gap-2" onClick={runCleanupNow} disabled={cleaning}>
+                                <Timer className={`h-3.5 w-3.5 ${cleaning ? "animate-spin" : ""}`} /> Clean up now
+                            </Button>
+                        </>
                     )}
                     <Button variant="outline" size="sm" className="gap-2" onClick={fetchMedia} disabled={loading}>
                         <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
@@ -344,11 +359,18 @@ export default function MediaPage() {
                 </div>
             </div>
             {isSuperAdmin && cleanup && (
-                <p className="text-xs text-muted-foreground -mt-2">
-                    {cleanup.retentionDays > 0
-                        ? <>Auto-cleanup: files older than <strong>{cleanup.retentionDays} days</strong> are deleted every night at 3:30 AM{cleanup.expiredCount > 0 ? <> — <strong>{cleanup.expiredCount}</strong> file(s) ({formatFileSize(cleanup.expiredBytes)}) are due now</> : " — nothing due right now"}.{cleanup.lastCleanupAt ? ` Last run ${new Date(cleanup.lastCleanupAt).toLocaleString()}.` : ""} Change the retention in Settings → App Configuration.</>
-                        : <>Auto-cleanup is <strong>off</strong>. Set a retention in Settings → App Configuration to delete old chat media automatically.</>}
-                </p>
+                <div className="text-xs text-muted-foreground -mt-2 space-y-1">
+                    <p>
+                        {cleanup.retentionDays > 0
+                            ? <>Auto-cleanup every night at 3:30 AM: files older than <strong>{cleanup.retentionDays} days</strong> and files of <strong>deleted sessions</strong> (shown as &quot;Unknown&quot; below). Change the retention in Settings → App Configuration.</>
+                            : <>Auto-cleanup by age is <strong>off</strong> (retention 0). Files of deleted sessions are still removed nightly. Set a retention in Settings → App Configuration.</>}
+                    </p>
+                    <p>
+                        Due now: <strong>{cleanup.expiredCount}</strong> file(s) older than {cleanup.retentionDays} days ({formatFileSize(cleanup.expiredBytes)}) + <strong>{cleanup.orphanCount}</strong> file(s) of deleted sessions ({formatFileSize(cleanup.orphanBytes)}).
+                        {cleanup.lastCleanupAt && <> Last run {new Date(cleanup.lastCleanupAt).toLocaleString()}{cleanup.lastResult ? <>: deleted {cleanup.lastResult.deleted + cleanup.lastResult.orphansDeleted} file(s), freed {formatFileSize(cleanup.lastResult.freedBytes)}</> : ""}.</>}
+                        {" "}The remaining files are all newer than the retention and belong to existing sessions — lower the days above to remove more.
+                    </p>
+                </div>
             )}
 
             {/* Stats */}

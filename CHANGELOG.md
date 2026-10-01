@@ -1,3 +1,9 @@
+## [v1.6.9] - 2026-10-01
+
+### Fixed
+- **Media clean-up left 1.9 GB of files from deleted sessions**: Media Manager showed them as "Unknown — 96 sessions". The clean-up now also removes media whose session no longer exists, regardless of age (nightly and on Clean up now), and the status line shows separately what is due by age and what belongs to deleted sessions, plus what the last run deleted (`SystemConfig.mediaLastCleanupResult`).
+- **Clean up now gave no clear feedback when nothing was due**: the button now takes an inline "older than N days" value (prefilled with the retention) so a one-off deeper clean-up is possible without changing the setting, and the result toast says exactly what was deleted or why nothing was.
+
 ## [v1.6.8] - 2026-10-01
 
 ### Added
