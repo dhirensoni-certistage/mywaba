@@ -1,3 +1,11 @@
+## [v1.6.8] - 2026-10-01
+
+### Added
+- **Media auto-cleanup**: downloaded chat media in `data/media` was never removed (12,500 files on one VPS after a few weeks; slows every build and eats disk). New `SystemConfig.mediaRetentionDays` (default 30, 0 = keep forever; Settings → App Configuration). A nightly job (03:30 server time, plus one pass 3 minutes after boot) deletes older files and clears `Message.mediaUrl` for them so chats show the text without a broken attachment. Media Manager (superadmin) shows what is due and has **Clean up now**; API `GET/POST /api/media/cleanup`. Uploaded files for auto-replies, scheduled messages and broadcasts (`uploads/`) are never touched.
+
+### Fixed
+- **Deploy caused a burst of `Cannot find module 'next/dist/compiled/...'` errors**: `npm ci` wipes `node_modules` while the old process is still serving requests. `scripts/deploy.sh` now skips the reinstall when `package-lock.json` is unchanged since the last deploy (hash stored in `node_modules/.deploy-lock-hash`).
+
 ## [v1.6.7] - 2026-10-01
 
 ### Fixed

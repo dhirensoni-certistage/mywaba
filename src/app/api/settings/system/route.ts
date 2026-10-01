@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-auth";
 import { invalidateAlertSettings, smtpConfigured } from "@/lib/alerts";
 import { CONFIGURABLE_MODULES } from "@/lib/modules";
+import { normalizeRetentionDays } from "@/lib/media-cleanup";
 
 export async function GET(request: NextRequest) {
     try {
@@ -65,6 +66,7 @@ export async function POST(req: Request) {
         }
 
         const general: Record<string, unknown> = {};
+        if (body.mediaRetentionDays !== undefined) general.mediaRetentionDays = normalizeRetentionDays(body.mediaRetentionDays);
         if (appName !== undefined) general.appName = appName;
         if (logoUrl !== undefined) general.logoUrl = logoUrl;
         if (faviconUrl !== undefined) general.faviconUrl = faviconUrl;
