@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { NextResponse, NextRequest } from "next/server";
 import { waManager } from "@/modules/whatsapp/manager";
-import { getAuthenticatedUser, canAccessSession, isAdmin } from "@/lib/api-auth";
+import { getAuthenticatedUser, canAccessSession, isAdmin, forbidStaff } from "@/lib/api-auth";
 
 // GET: Retrieve session settings
 export async function GET(
@@ -49,6 +49,8 @@ export async function PATCH(
         if (!user) {
             return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
         }
+        const staffDenied = forbidStaff(user, "change session settings or delete sessions");
+        if (staffDenied) return staffDenied;
 
         // Check if user can access this session
         const canAccess = await canAccessSession(user.id, user.role, sessionId);
@@ -90,6 +92,8 @@ export async function DELETE(
         if (!user) {
             return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
         }
+        const staffDenied = forbidStaff(user, "change session settings or delete sessions");
+        if (staffDenied) return staffDenied;
 
         // Check if user can access this session
         const canAccess = await canAccessSession(user.id, user.role, sessionId);

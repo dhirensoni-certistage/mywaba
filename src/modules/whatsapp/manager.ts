@@ -86,6 +86,10 @@ export class WhatsAppManager {
             }
         });
 
+        // Let the owner's open dashboard tabs receive this session's realtime events right away.
+        // (Sockets are authenticated and only join rooms for sessions the user can access.)
+        try { this.io.in(`user:${userId}`).socketsJoin(sessionId); } catch { /* ignore */ }
+
         // Don't init socket — user clicks Start manually
         logger.info("Manager", `Session ${sessionId} created (STOPPED). User must click Start to connect.`);
         return session;
@@ -119,7 +123,6 @@ export class WhatsAppManager {
             await instance.shutdown();
             instance.status = "STOPPED";
             const payload = { sessionId, status: "STOPPED", qr: null };
-            this.io?.emit("connection.update", payload);
             this.io?.to(sessionId).emit("connection.update", payload);
             await prisma.session.update({
                 where: { sessionId },

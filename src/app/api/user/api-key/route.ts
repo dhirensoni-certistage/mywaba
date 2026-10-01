@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
-import { generateApiKey } from "@/lib/api-auth";
+import { generateApiKey, forbidStaff } from "@/lib/api-auth";
 
 // Get current user's API key
 export async function GET() {
@@ -24,6 +24,9 @@ export async function GET() {
 export async function POST() {
     const session = await auth();
     if (!session?.user?.id) return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
+    const me = await prisma.user.findUnique({ where: { id: session.user.id }, select: { role: true } });
+    const staffDenied = forbidStaff(me, "create API keys");
+    if (staffDenied) return staffDenied;
 
     try {
         const newApiKey = generateApiKey();
@@ -44,6 +47,9 @@ export async function POST() {
 export async function DELETE() {
     const session = await auth();
     if (!session?.user?.id) return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
+    const me = await prisma.user.findUnique({ where: { id: session.user.id }, select: { role: true } });
+    const staffDenied = forbidStaff(me, "manage API keys");
+    if (staffDenied) return staffDenied;
 
     try {
         await prisma.user.update({

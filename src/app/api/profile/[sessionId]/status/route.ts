@@ -1,5 +1,5 @@
 import { NextResponse, NextRequest } from "next/server";
-import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
+import { getAuthenticatedUser, canAccessSession, forbidStaff } from "@/lib/api-auth";
 import { waManager } from "@/modules/whatsapp/manager";
 
 export async function PUT(
@@ -12,6 +12,8 @@ export async function PUT(
         if (!user) {
             return NextResponse.json({ status: false, message: "Unauthorized" }, { status: 401 });
         }
+        const staffDenied = forbidStaff(user, "change the WhatsApp profile");
+        if (staffDenied) return staffDenied;
 
         const canAccess = await canAccessSession(user.id, user.role, sessionId);
         if (!canAccess) {

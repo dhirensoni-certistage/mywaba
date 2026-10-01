@@ -34,7 +34,7 @@ import pkg from "../../../package.json";
 
 interface NavGroup {
     label: string;
-    items: { href: string; label: string; icon: React.ElementType; external?: boolean; superadminOnly?: boolean }[];
+    items: { href: string; label: string; icon: React.ElementType; external?: boolean; superadminOnly?: boolean; ownerOnly?: boolean }[];
 }
 
 // Keep in sync with sidebar-nav.tsx
@@ -43,7 +43,7 @@ const navGroups: NavGroup[] = [
         label: "Main",
         items: [
             { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-            { href: "/dashboard/sessions", label: "Sessions / QR", icon: QrCode },
+            { href: "/dashboard/sessions", label: "Sessions / QR", icon: QrCode, ownerOnly: true },
         ],
     },
     {
@@ -65,11 +65,11 @@ const navGroups: NavGroup[] = [
     {
         label: "Automation",
         items: [
-            { href: "/dashboard/bot-settings", label: "Bot Settings", icon: Bot },
-            { href: "/dashboard/autoreply", label: "Auto Reply", icon: MessageCircleReply },
-            { href: "/dashboard/profile", label: "Bot Profile", icon: UserCircle },
+            { href: "/dashboard/bot-settings", label: "Bot Settings", icon: Bot, ownerOnly: true },
+            { href: "/dashboard/autoreply", label: "Auto Reply", icon: MessageCircleReply, ownerOnly: true },
+            { href: "/dashboard/profile", label: "Bot Profile", icon: UserCircle, ownerOnly: true },
             { href: "/dashboard/scheduler", label: "Scheduler", icon: CalendarClock },
-            { href: "/dashboard/webhooks", label: "Webhooks & API", icon: Webhook },
+            { href: "/dashboard/webhooks", label: "Webhooks & API", icon: Webhook, ownerOnly: true },
         ],
     },
     {
@@ -83,9 +83,9 @@ const navGroups: NavGroup[] = [
         label: "Administration",
         items: [
             { href: "/dashboard/media", label: "Media Manager", icon: HardDrive },
-            { href: "/dashboard/sessions/access", label: "Session Access", icon: UserPlus },
-            { href: "/dashboard/users", label: "Users", icon: Users },
-            { href: "/dashboard/settings", label: "Settings", icon: Settings },
+            { href: "/dashboard/sessions/access", label: "Session Access", icon: UserPlus, ownerOnly: true },
+            { href: "/dashboard/users", label: "Users", icon: Users, superadminOnly: true },
+            { href: "/dashboard/settings", label: "Settings", icon: Settings, ownerOnly: true },
             { href: "/dashboard/system-monitor", label: "System Monitor", icon: Activity, superadminOnly: true },
             { href: "/dashboard/notifications", label: "Notifications", icon: Bell, superadminOnly: true },
         ],
@@ -120,7 +120,7 @@ export function MobileNav({ appName = "WABA" }: { appName?: string }) {
                 <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-1">
                     {navGroups.map((group) => {
                         const visibleItems = group.items.filter(
-                            (item) => !item.superadminOnly || userRole === "SUPERADMIN"
+                            (item) => (!item.superadminOnly || userRole === "SUPERADMIN") && (!item.ownerOnly || userRole !== "STAFF")
                         );
                         if (visibleItems.length === 0) return null;
 

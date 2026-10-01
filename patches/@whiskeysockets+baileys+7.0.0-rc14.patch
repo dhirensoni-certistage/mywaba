@@ -1,0 +1,113 @@
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/messages-media.js b/node_modules/@whiskeysockets/baileys/lib/Utils/messages-media.js
+index a3d2fa6..fd6938e 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/messages-media.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/messages-media.js
+@@ -641,7 +641,7 @@ const uploadMedia = async (params, logger) => {
+     }
+ };
+ export const getWAUploadToServer = ({ customUploadHosts, fetchAgent, logger, options }, refreshMediaConn) => {
+-    return async (filePath, { mediaType, fileEncSha256B64, timeoutMs }) => {
++    return async (filePath, { mediaType, fileEncSha256B64, timeoutMs, newsletter }) => {
+         // send a query JSON to obtain the url & auth token to upload our media
+         let uploadInfo = await refreshMediaConn(false);
+         let urls;
+@@ -662,7 +662,17 @@ export const getWAUploadToServer = ({ customUploadHosts, fetchAgent, logger, opt
+         for (const { hostname } of hosts) {
+             logger.debug(`uploading to "${hostname}"`);
+             const auth = encodeURIComponent(uploadInfo.auth);
+-            const url = `https://${hostname}${MEDIA_PATH_MAP[mediaType]}/${fileEncSha256B64}?auth=${auth}&token=${fileEncSha256B64}`;
++            // WA-AKG: newsletter (channel) media is uploaded unencrypted to the newsletter endpoints
++            const isNewsletterUrl = !!newsletter;
++            const newsletterPath = MEDIA_PATH_MAP[mediaType] ? MEDIA_PATH_MAP[mediaType].replace('/mms/', '/newsletter/newsletter-') : '/newsletter/newsletter-document';
++            const urlPath = isNewsletterUrl ? newsletterPath : MEDIA_PATH_MAP[mediaType];
++            let url = `https://${hostname}${urlPath}/${fileEncSha256B64}?auth=${auth}&token=${fileEncSha256B64}`;
++            if (isNewsletterUrl) {
++                url += '&server_thumb_gen=1';
++                if (mediaType === 'video' || mediaType === 'gif' || mediaType === 'ptv') {
++                    url += '&server_transcode=1';
++                }
++            }
+             let result;
+             try {
+                 result = await uploadMedia({
+@@ -676,6 +686,9 @@ export const getWAUploadToServer = ({ customUploadHosts, fetchAgent, logger, opt
+                     urls = {
+                         mediaUrl: result.url,
+                         directPath: result.direct_path,
++                        thumbnailDirectPath: result.thumbnail_info?.thumbnail_direct_path,
++                        thumbnailSha256: result.thumbnail_info?.thumbnail_sha256,
++                        handle: result.handle,
+                         meta_hmac: result.meta_hmac,
+                         fbid: result.fbid,
+                         ts: result.ts
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/messages.js b/node_modules/@whiskeysockets/baileys/lib/Utils/messages.js
+index 247b1f1..9fb1efc 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/messages.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/messages.js
+@@ -101,22 +101,31 @@ export const prepareWAMessageMedia = async (message, options) => {
+         logger?.info({ key: cacheableKey }, 'Preparing raw media for newsletter');
+         const { filePath, fileSha256, fileLength } = await getRawMediaUploadData(uploadData.media, options.mediaTypeOverride || mediaType, logger);
+         const fileSha256B64 = fileSha256.toString('base64');
+-        const { mediaUrl, directPath } = await options.upload(filePath, {
++        const { mediaUrl, directPath: rawDirectPath, thumbnailDirectPath, thumbnailSha256, handle } = await options.upload(filePath, {
+             fileEncSha256B64: fileSha256B64,
+             mediaType: mediaType,
++            newsletter: true,
+             timeoutMs: options.mediaUploadTimeoutMs
+         });
+         await fs.unlink(filePath);
++        // WA-AKG: newsletter media is served from the /m1/ path and carries no encryption keys
++        const directPath = rawDirectPath && rawDirectPath.includes('/o1/') ? rawDirectPath.replace('/o1/', '/m1/') : rawDirectPath;
++        const mediaMsg = {
++            directPath,
++            thumbnailDirectPath,
++            thumbnailSha256: thumbnailSha256 ? Buffer.from(thumbnailSha256, 'base64') : undefined,
++            fileSha256,
++            fileLength,
++            ...uploadData,
++            media: undefined
++        };
++        delete mediaMsg.mediaKey;
++        delete mediaMsg.mediaKeyTimestamp;
++        delete mediaMsg.fileEncSha256;
++        if (handle) mediaMsg.mediaKeyDomain = handle;
+         const obj = WAProto.Message.fromObject({
+             // todo: add more support here
+-            [`${mediaType}Message`]: MessageTypeProto[mediaType].fromObject({
+-                url: mediaUrl,
+-                directPath,
+-                fileSha256,
+-                fileLength,
+-                ...uploadData,
+-                media: undefined
+-            })
++            [`${mediaType}Message`]: MessageTypeProto[mediaType].fromObject(mediaMsg)
+         });
+         if (uploadData.ptv) {
+             obj.ptvMessage = obj.videoMessage;
+@@ -852,9 +861,24 @@ export const downloadMediaMessage = async (message, type, options, ctx) => {
+         const contentType = getContentType(mContent);
+         let mediaType = contentType?.replace('Message', '');
+         const media = mContent[contentType];
+-        if (!media || typeof media !== 'object' || (!('url' in media) && !('thumbnailDirectPath' in media))) {
++        if (!media || typeof media !== 'object' || (!('url' in media) && !('thumbnailDirectPath' in media) && !('directPath' in media))) {
+             throw new Boom(`"${contentType}" message is not a media message`);
+         }
++        // WA-AKG: newsletter media has no mediaKey — it is unencrypted, fetch it directly
++        const isNewsletterMedia = !media.mediaKey && (media.directPath || media.thumbnailDirectPath);
++        if (isNewsletterMedia) {
++            const dp = media.directPath || media.thumbnailDirectPath;
++            const downloadUrl = dp.startsWith('http') ? dp : `https://mmg.whatsapp.net${dp}`;
++            const fetchRes = await fetch(downloadUrl, { method: 'GET', headers: { Origin: 'https://web.whatsapp.com' } });
++            if (!fetchRes.ok) {
++                throw new Boom(`Newsletter media download failed: HTTP ${fetchRes.status} ${fetchRes.statusText}`, { statusCode: fetchRes.status });
++            }
++            if (type === 'buffer') {
++                return Buffer.from(await fetchRes.arrayBuffer());
++            }
++            const { Readable } = await import('stream');
++            return Readable.fromWeb(fetchRes.body);
++        }
+         let download;
+         if ('thumbnailDirectPath' in media && !('url' in media)) {
+             download = {

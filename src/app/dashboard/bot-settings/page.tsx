@@ -44,6 +44,14 @@ export default function BotSettingsPage() {
         welcomeMessage: "",
         autoRead: false,
         alwaysOnline: false,
+
+        // Broadcast safety
+        dailyBroadcastLimit: 200,
+        quietHoursStart: "" as string | number,
+        quietHoursEnd: "" as string | number,
+        optOutEnabled: true,
+        optOutKeywords: "STOP, UNSUBSCRIBE, STOP ALL, CANCEL",
+        optOutReply: "",
         botAllowedJids: [] as string[],
         botBlockedJids: [] as string[],
         autoReplyAllowedJids: [] as string[],
@@ -74,6 +82,14 @@ export default function BotSettingsPage() {
                         removeBgApiKey: data.removeBgApiKey || "",
                         prefix: data.prefix || "#",
                         welcomeMessage: data.welcomeMessage || "",
+                        dailyBroadcastLimit: data.dailyBroadcastLimit ?? 200,
+                        quietHoursStart: data.quietHoursStart ?? "",
+                        quietHoursEnd: data.quietHoursEnd ?? "",
+                        optOutEnabled: data.optOutEnabled ?? true,
+                        optOutKeywords: Array.isArray(data.optOutKeywords) && data.optOutKeywords.length > 0
+                            ? data.optOutKeywords.join(", ")
+                            : "STOP, UNSUBSCRIBE, STOP ALL, CANCEL",
+                        optOutReply: data.optOutReply || "",
                         botAllowedJids: data.botAllowedJids || [],
                         botBlockedJids: data.botBlockedJids || [],
                         autoReplyAllowedJids: data.autoReplyAllowedJids || [],
@@ -105,7 +121,13 @@ export default function BotSettingsPage() {
             const res = await fetch(`/api/sessions/${sessionId}/bot-config`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(botConfig)
+                body: JSON.stringify({
+                    ...botConfig,
+                    quietHoursStart: botConfig.quietHoursStart === "" ? null : Number(botConfig.quietHoursStart),
+                    quietHoursEnd: botConfig.quietHoursEnd === "" ? null : Number(botConfig.quietHoursEnd),
+                    optOutKeywords: botConfig.optOutKeywords.split(",").map(k => k.trim()).filter(Boolean),
+                    optOutReply: botConfig.optOutReply.trim() || null,
+                })
             });
 
             if (res.ok) {
@@ -399,6 +421,88 @@ export default function BotSettingsPage() {
                                 <Button className="w-full sm:w-auto" onClick={handleSaveBot} disabled={botLoading || !sessionId}>
                                     {botLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                                     Save Media Settings
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Broadcast Safety */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <ShieldCheck className="h-5 w-5 text-green-600" />
+                                Broadcast Safety (Number Protection)
+                            </CardTitle>
+                            <CardDescription>
+                                Hard limits that the Broadcast engine enforces for this session. They protect the WhatsApp number from being logged out or banned for bulk messaging.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            <div className="grid gap-4 sm:grid-cols-3">
+                                <div className="space-y-2">
+                                    <Label htmlFor="daily-limit">Daily broadcast limit</Label>
+                                    <Input id="daily-limit" type="number" min={0} max={5000}
+                                        value={botConfig.dailyBroadcastLimit}
+                                        onChange={e => setBotConfig(prev => ({ ...prev, dailyBroadcastLimit: Math.max(0, parseInt(e.target.value) || 0) }))} />
+                                    <p className="text-xs text-muted-foreground">Messages per rolling 24 hours. 0 = no limit (not recommended). New numbers: 50. Warmed-up: 200.</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="quiet-start">Quiet hours start</Label>
+                                    <Select value={String(botConfig.quietHoursStart)} onValueChange={v => setBotConfig(prev => ({ ...prev, quietHoursStart: v === "off" ? "" : Number(v) }))}>
+                                        <SelectTrigger id="quiet-start"><SelectValue placeholder="Off" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="off">Off</SelectItem>
+                                            {Array.from({ length: 24 }, (_, h) => (
+                                                <SelectItem key={h} value={String(h)}>{(h % 12 === 0 ? 12 : h % 12).toString().padStart(2, "0")}:00 {h >= 12 ? "PM" : "AM"}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="quiet-end">Quiet hours end</Label>
+                                    <Select value={String(botConfig.quietHoursEnd)} onValueChange={v => setBotConfig(prev => ({ ...prev, quietHoursEnd: v === "off" ? "" : Number(v) }))}>
+                                        <SelectTrigger id="quiet-end"><SelectValue placeholder="Off" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="off">Off</SelectItem>
+                                            {Array.from({ length: 24 }, (_, h) => (
+                                                <SelectItem key={h} value={String(h)}>{(h % 12 === 0 ? 12 : h % 12).toString().padStart(2, "0")}:00 {h >= 12 ? "PM" : "AM"}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">Broadcasts pause inside this window (system timezone). Recommended 10 PM &ndash; 8 AM.</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-between space-x-2 border p-3 rounded-lg bg-green-500/5 border-green-500/20">
+                                <Label htmlFor="opt-out" className="flex flex-col space-y-1">
+                                    <span className="font-semibold">Honour opt-out replies</span>
+                                    <span className="font-normal text-xs text-muted-foreground">When a contact replies with one of the keywords below, they are flagged and skipped by every future broadcast. People who cannot opt out report you as spam instead.</span>
+                                </Label>
+                                <Switch id="opt-out" checked={botConfig.optOutEnabled}
+                                    onCheckedChange={c => setBotConfig(prev => ({ ...prev, optOutEnabled: c }))} />
+                            </div>
+
+                            {botConfig.optOutEnabled && (
+                                <div className="grid gap-4 sm:grid-cols-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="opt-out-keywords">Opt-out keywords (comma separated)</Label>
+                                        <Input id="opt-out-keywords" value={botConfig.optOutKeywords}
+                                            onChange={e => setBotConfig(prev => ({ ...prev, optOutKeywords: e.target.value }))} />
+                                        <p className="text-xs text-muted-foreground">Matched case-insensitively against the whole message.</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="opt-out-reply">Confirmation reply (optional)</Label>
+                                        <Textarea id="opt-out-reply" rows={2} placeholder="You have been unsubscribed. You will not receive further messages from us."
+                                            value={botConfig.optOutReply}
+                                            onChange={e => setBotConfig(prev => ({ ...prev, optOutReply: e.target.value }))} />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="pt-2">
+                                <Button onClick={handleSaveBot} disabled={botLoading || !sessionId}>
+                                    {botLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                                    Save Safety Settings
                                 </Button>
                             </div>
                         </CardContent>

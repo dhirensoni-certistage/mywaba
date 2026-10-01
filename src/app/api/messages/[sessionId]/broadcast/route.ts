@@ -1,19 +1,83 @@
 import { NextResponse, NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { waManager } from "@/modules/whatsapp/manager";
 import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
-import type { AnyMessageContent } from "@whiskeysockets/baileys";
+import { startBroadcast, getBroadcastHealth, BROADCAST_LIMITS, type RecipientInput } from "@/modules/whatsapp/broadcast";
+import { waManager } from "@/modules/whatsapp/manager";
 import { z } from "zod";
 
+const recipientSchema = z.union([
+    z.string(),
+    z.object({
+        number: z.string().optional(),
+        phone: z.string().optional(),
+        jid: z.string().optional(),
+        name: z.string().nullable().optional(),
+        vars: z.record(z.string(), z.union([z.string(), z.number(), z.null()])).optional()
+    }).passthrough()
+]);
+
+const buttonSchema = z.object({
+    type: z.enum(["reply", "url", "call"]).default("reply"),
+    text: z.string().min(1).max(25),
+    url: z.string().optional(),
+    phone: z.string().optional()
+});
+
 const broadcastBodySchema = z.object({
-    recipients: z.array(z.string()),
+    recipients: z.array(recipientSchema).min(1, "At least one recipient is required"),
     message: z.string().optional().default(""),
     mediaUrl: z.string().optional().nullable(),
     mediaType: z.string().optional().nullable(),
-    delay: z.number().optional()
+    /** Delay between messages in ms. Clamped server-side to a safe minimum. */
+    delay: z.number().optional(),
+    /** Messages per batch before a long cooldown. */
+    batchSize: z.number().optional(),
+    /** Cooldown between batches in ms. */
+    batchPauseMs: z.number().optional(),
+    simulateTyping: z.boolean().optional(),
+    validateNumbers: z.boolean().optional(),
+    shuffle: z.boolean().optional(),
+    /** Spread the run evenly over N hours (overrides delay/batch settings). */
+    spreadHours: z.number().min(0).max(72).optional(),
+    /** Extra connected sessions the user can access; recipients are split round-robin across all of them. */
+    sessionIds: z.array(z.string()).optional(),
+    /** Up to 3 interactive buttons (BETA). */
+    buttons: z.array(buttonSchema).max(3).optional(),
+    footer: z.string().max(60).optional()
 }).refine(data => data.message?.trim() || data.mediaUrl?.trim(), {
     message: "Either message or mediaUrl must be provided"
 });
+
+/**
+ * Returns the server-side safety limits plus this session's number health
+ * (sent in last 24h vs daily limit, quiet hours, opt-outs) so the dashboard can mirror them.
+ */
+export async function GET(
+    request: NextRequest,
+    { params }: { params: Promise<{ sessionId: string }> }
+) {
+    const user = await getAuthenticatedUser(request);
+    if (!user) {
+        return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
+    }
+    const { sessionId } = await params;
+    const canAccess = await canAccessSession(user.id, user.role, sessionId);
+    if (!canAccess) {
+        return NextResponse.json({ status: false, message: "Forbidden", error: "Forbidden" }, { status: 403 });
+    }
+    try {
+        const health = await getBroadcastHealth(sessionId);
+        return NextResponse.json({
+            status: true,
+            data: {
+                limits: BROADCAST_LIMITS,
+                health: { ...health, remaining: Number.isFinite(health.remaining) ? health.remaining : null }
+            }
+        });
+    } catch (e) {
+        console.error("Broadcast health error", e);
+        return NextResponse.json({ status: false, message: "Failed to load broadcast health" }, { status: 500 });
+    }
+}
 
 export async function POST(
     request: NextRequest,
@@ -30,164 +94,68 @@ export async function POST(
 
         const parseResult = broadcastBodySchema.safeParse(body);
         if (!parseResult.success) {
-            return NextResponse.json({ error: parseResult.error.flatten() }, { status: 400 });
+            return NextResponse.json({ status: false, message: "Invalid request", error: parseResult.error.flatten() }, { status: 400 });
         }
-
-        const { recipients, message, mediaUrl, mediaType, delay } = parseResult.data;
 
         const canAccess = await canAccessSession(user.id, user.role, sessionId);
         if (!canAccess) {
             return NextResponse.json({ status: false, message: "Forbidden", error: "Forbidden" }, { status: 403 });
         }
 
-        const instance = waManager.getInstance(sessionId);
-        if (!instance?.socket) {
-            return NextResponse.json({ status: false, message: "Session not ready", error: "Session not ready" }, { status: 503 });
+        const { recipients, message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, sessionIds, buttons, footer } = parseResult.data;
+
+        // ---- Multi-number rotation: split the list across every connected session the user may use ----
+        const targetSessions: string[] = [sessionId];
+        const rejectedSessions: { sessionId: string; reason: string }[] = [];
+        for (const extra of Array.from(new Set(sessionIds || []))) {
+            if (extra === sessionId) continue;
+            const ok = await canAccessSession(user.id, user.role, extra);
+            if (!ok) { rejectedSessions.push({ sessionId: extra, reason: "no access" }); continue; }
+            const inst = waManager.getInstance(extra);
+            if (!inst?.socket || inst.status !== "CONNECTED") { rejectedSessions.push({ sessionId: extra, reason: "not connected" }); continue; }
+            targetSessions.push(extra);
         }
 
-        // --- Save BroadcastLog & recipients to DB ---
-        const log = await prisma.broadcastLog.create({
-            data: {
-                sessionId,
-                message: message || (mediaUrl ? `[Media: ${mediaType || 'file'}]` : ""),
-                total: recipients.length,
-                delay: delay || 2000,
-                status: "running",
-                recipients: {
-                    create: recipients.map(jid => ({
-                        jid,
-                        status: "pending"
-                    }))
-                }
-            },
-            include: { recipients: true }
-        });
+        const buckets: RecipientInput[][] = targetSessions.map(() => []);
+        (recipients as RecipientInput[]).forEach((r, i) => { buckets[i % targetSessions.length].push(r); });
 
-        let messageContent: AnyMessageContent;
-        if (mediaUrl) {
-            let url = mediaUrl;
-            if (url.startsWith("/")) {
-                const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3030}`;
-                url = `${baseUrl.replace(/\/$/, "")}${url}`;
+        const common = { message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, buttons, footer };
+        const started: { sessionId: string; broadcastId: string; total: number; delayMs: number }[] = [];
+        const invalid: string[] = [];
+        const failures: { sessionId: string; error: string }[] = [];
+
+        for (let i = 0; i < targetSessions.length; i++) {
+            if (buckets[i].length === 0) continue;
+            try {
+                const result = await startBroadcast({ sessionId: targetSessions[i], recipients: buckets[i], ...common });
+                started.push({ sessionId: targetSessions[i], broadcastId: result.broadcastId, total: result.total, delayMs: result.delayMs });
+                invalid.push(...result.invalid);
+            } catch (e: any) {
+                // The primary session failing is a hard error; an extra session failing just means its share is not sent.
+                if (i === 0) throw e;
+                failures.push({ sessionId: targetSessions[i], error: e?.message || "Failed to start" });
             }
-            const type = mediaType || "image";
-            if (type === "video") {
-                messageContent = { video: { url }, caption: message || "" };
-            } else if (type === "document") {
-                messageContent = { document: { url }, caption: message || "", mimetype: "application/octet-stream", fileName: url.split("/").pop() || "file" };
-            } else if (type === "audio") {
-                messageContent = { audio: { url }, mimetype: "audio/mp4" };
-            } else {
-                messageContent = { image: { url }, caption: message || "" };
-            }
-        } else {
-            messageContent = { text: message || "" };
         }
-        const io = (global as any).io;
-        const broadcastId = log.id;
-
-        // Emit initial state
-        if (io) {
-            io.to(sessionId).emit("broadcast.progress", {
-                broadcastId,
-                status: "running",
-                total: recipients.length,
-                sent: 0,
-                failed: 0,
-                current: null,
-                progress: 0,
-                startedAt: log.startedAt.toISOString()
-            });
-        }
-
-        // Process in background — update DB as we go
-        (async () => {
-            let sent = 0;
-            let failed = 0;
-            const errors: { jid: string; error: string }[] = [];
-
-            for (let i = 0; i < recipients.length; i++) {
-                const jid = recipients[i];
-                try {
-                    await instance.socket!.sendMessage(jid, messageContent);
-                    sent++;
-
-                    // Update recipient status in DB
-                    await prisma.broadcastRecipient.updateMany({
-                        where: { broadcastLogId: broadcastId, jid },
-                        data: { status: "sent", sentAt: new Date() }
-                    });
-                } catch (e: any) {
-                    failed++;
-                    errors.push({ jid, error: e.message || "Unknown error" });
-                    console.error(`Failed to send broadcast to ${jid}`, e);
-
-                    // Update recipient error in DB
-                    await prisma.broadcastRecipient.updateMany({
-                        where: { broadcastLogId: broadcastId, jid },
-                        data: { status: "failed", error: e.message || "Unknown error" }
-                    });
-                }
-
-                const progress = Math.round(((sent + failed) / recipients.length) * 100);
-
-                // Update BroadcastLog progress in DB
-                await prisma.broadcastLog.update({
-                    where: { id: broadcastId },
-                    data: { sent, failed }
-                });
-
-                // Socket real-time
-                if (io) {
-                    io.to(sessionId).emit("broadcast.progress", {
-                        broadcastId,
-                        status: "running",
-                        total: recipients.length,
-                        sent,
-                        failed,
-                        current: jid,
-                        progress
-                    });
-                }
-
-                // Delay between sends
-                if (i < recipients.length - 1) {
-                    const baseDelay = delay || 2000;
-                    const randomDelay = baseDelay + Math.floor(Math.random() * (baseDelay * 0.5));
-                    await new Promise(r => setTimeout(r, randomDelay));
-                }
-            }
-
-            // Mark as completed in DB
-            await prisma.broadcastLog.update({
-                where: { id: broadcastId },
-                data: { status: "completed", sent, failed, completedAt: new Date() }
-            });
-
-            // Final socket emit
-            if (io) {
-                io.to(sessionId).emit("broadcast.progress", {
-                    broadcastId,
-                    status: "completed",
-                    total: recipients.length,
-                    sent,
-                    failed,
-                    errors,
-                    progress: 100,
-                    completedAt: new Date().toISOString()
-                });
-            }
-            console.log(`Broadcast ${broadcastId} completed: ${sent} sent, ${failed} failed out of ${recipients.length}`);
-        })();
 
         return NextResponse.json({
             status: true,
-            message: "Broadcast started",
-            data: { broadcastId: log.id, total: recipients.length }
+            message: started.length > 1 ? `Broadcast started on ${started.length} numbers` : "Broadcast started",
+            data: {
+                // legacy single-broadcast fields (first/primary run)
+                broadcastId: started[0]?.broadcastId,
+                total: started.reduce((n, b) => n + b.total, 0),
+                invalidRecipients: Array.from(new Set(invalid)),
+                broadcasts: started,
+                rejectedSessions,
+                failures
+            }
         });
-
-    } catch (e) {
-        console.error("Broadcast error", e);
-        return NextResponse.json({ status: false, message: "Failed to start broadcast", error: "Failed to start broadcast" }, { status: 500 });
+    } catch (e: any) {
+        const msg = e?.message || "Failed to start broadcast";
+        const status = /not connected|Session not ready/i.test(msg) ? 503
+            : /No valid recipients|Too many recipients|Failed to fetch media|Daily limit|daily limit/i.test(msg) ? 400
+            : 500;
+        if (status === 500) console.error("Broadcast error", e);
+        return NextResponse.json({ status: false, message: msg, error: msg }, { status });
     }
 }

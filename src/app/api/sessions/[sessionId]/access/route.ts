@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser, isSessionOwner } from "@/lib/api-auth";
+import { getAuthenticatedUser, isSessionOwner, forbidStaff } from "@/lib/api-auth";
 import { z } from "zod";
 
 const grantAccessSchema = z.object({
@@ -21,6 +21,8 @@ export async function GET(
         if (!user) {
             return NextResponse.json({ status: false, message: "Unauthorized" }, { status: 401 });
         }
+        const staffDenied = forbidStaff(user, "manage session access");
+        if (staffDenied) return staffDenied;
 
         const { sessionId } = await params;
 
@@ -73,6 +75,8 @@ export async function POST(
         if (!user) {
             return NextResponse.json({ status: false, message: "Unauthorized" }, { status: 401 });
         }
+        const staffDenied = forbidStaff(user, "manage session access");
+        if (staffDenied) return staffDenied;
 
         const { sessionId } = await params;
 
@@ -171,6 +175,8 @@ export async function DELETE(
         if (!user) {
             return NextResponse.json({ status: false, message: "Unauthorized" }, { status: 401 });
         }
+        const staffDenied = forbidStaff(user, "manage session access");
+        if (staffDenied) return staffDenied;
 
         const { sessionId } = await params;
 

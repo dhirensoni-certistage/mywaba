@@ -1,3 +1,57 @@
+## [v1.6.5] - 2026-10-01
+
+### Fixed
+- **Broadcast mass-failure after WhatsApp logout**: A broadcast that lost its session mid-way (WhatsApp force-unlinked the device, 401 `device_removed`) kept looping through the remaining recipients every 2s, failing each one against a dead/null socket. The engine now watches the live session, waits up to 2 minutes for a reconnect, and otherwise aborts cleanly with the reason stored on the broadcast (`BroadcastLog.error`) and shown in the dashboard.
+- **Duplicate scheduler**: Two independent pollers (`node-cron` every minute and a `setInterval` every 30s) both sent due scheduled messages, so a message could go out twice and the database was polled twice as often. Only the cron runner remains; messages are claimed atomically (`PENDING -> SENDING`) before sending.
+- **Double sockets per session**: Clicking Start while a session was mid-reconnect created a second Baileys socket with duplicate event handlers. `init()` now disposes any existing socket first, and connection events from replaced sockets are ignored.
+- **Stale running broadcasts**: Broadcasts interrupted by a server restart stayed "running" forever in History. They are closed out as failed on boot.
+- **`connection.update` webhook never fired**: The event existed in the UI and docs but was never dispatched. It now fires on every status change (SCAN_QR, CONNECTED, DISCONNECTED, STOPPED, LOGGED_OUT).
+- **Unauthenticated realtime channel**: Socket.IO accepted any connection and let any client join any session room (full message stream) — connection updates were broadcast to all clients. Sockets now require a valid login cookie or API key, auto-join only the sessions the user can access, and `join-session` is verified with the same rule as the REST API.
+- **Stale role in server components**: Dashboard and chat pages read the role from the login token. A user demoted from SUPERADMIN kept superadmin visibility until re-login. Server components now read the role from the database.
+- **Stale session selection across accounts**: The `sessionId` cookie is cleared when it points to a session the current user cannot access.
+
+### Added
+- **Number pre-check with one-click clean-up**: Start validates the whole list first (`POST …/broadcast/recipients/check`, 300 numbers per page, results cached per session for 24h in `src/modules/whatsapp/number-check.ts`) and shows uploaded / on WhatsApp / not on WhatsApp / invalid / opted out with the problem list; **Remove & keep** drops them, **Start anyway** lets the engine skip them. The engine's own validation now uses the same cache, so pre-checked lists are not looked up twice.
+- **Retry failed** (`POST …/broadcast/{id}/retry`, button in History → Detail): re-sends temporary failures with the same message, media, buttons and pacing; permanent failures (not on WhatsApp, opted out) are excluded. `BroadcastLog` now stores `mediaUrl`, `mediaType`, `options`; `BroadcastRecipient` stores `vars` so retries stay personalised.
+- **Alerts** (`src/lib/alerts.ts`, Settings → Alerts, `POST /api/settings/alerts/test`): Telegram bot and/or SMTP email (`SMTP_*` env) for session logout / auto-stop, broadcasts that stopped or had failures, and 80% / 100% of the daily limit. 5-minute de-duplication; dashboard notification for the owner as well. New `SystemConfig` alert columns.
+- **On-page guidance**: "Before you press Start" tips card and expanded Safety Guide tab (scaling safely, Excel upload, buttons, retries, alerts, roles).
+- **Excel / CSV recipient upload** (`POST /api/messages/{sessionId}/broadcast/recipients/parse`, exceljs): header-based detection of the number and name columns, preview in the dashboard, every column available as a `{column}` / `{column|fallback}` placeholder in the message or caption. Broadcast recipients may now be objects `{ number, name, vars }`.
+- **Spread evenly over N hours**: even pacing for big lists (overrides delay/batch settings; never below the 3 s minimum).
+- **Multi-number rotation**: `sessionIds[]` splits the list round-robin across other connected sessions the user can access; one run per number with its own daily limit, progress card and Stop button ("Stop all" for the group).
+- **Interactive buttons (BETA)**: up to 3 quick-reply / URL / call buttons via a raw `interactiveMessage` (`src/modules/whatsapp/interactive.ts`); automatic fallback to plain text if WhatsApp rejects it.
+- **Quick daily-limit edit** in the Number Health card (OWNER/SUPERADMIN), limit cap raised to 10000 (0 = off).
+- **STAFF role restrictions**: staff can chat/broadcast/use tools on shared sessions but get 403 on session management (create/start/stop/restart/logout/pair/delete/settings), bot config, webhooks (incl. logs/test), auto-replies, profile changes, access grants and API keys. Management entries are hidden from the sidebar for STAFF.
+- **Broadcast Safety settings** (Bot Settings → Broadcast Safety, new `BotConfig` columns): per-session **daily broadcast limit** (rolling 24h, default 200; a run that would exceed it is refused up front and stopped mid-run if other sends consume the budget), **quiet hours** (sends pause inside the window, system timezone) and **opt-out handling** (contacts who reply STOP / UNSUBSCRIBE / STOP ALL / CANCEL are flagged via `Contact.optedOut` and skipped by every future broadcast, with an optional confirmation reply).
+- **Personalisation & spintax** in broadcast text/captions: `{name}`, `{name|fallback}` and `{option a|option b}` so no two messages are identical. Recipients are sent in random order by default.
+- **Number Health card** on the Broadcast page: sent in last 24h vs limit, quiet-hours state, opted-out count, last disconnect reason. `GET /api/messages/{sessionId}/broadcast` now returns limits + health.
+- **Safety Guide tab** on the Broadcast page, visible to every role including staff, with the ban-avoidance guidance from `docs/BROADCAST_SAFETY.md`.
+
+### Changed
+- **Baileys upgraded `7.0.0-rc.9` → `7.0.0-rc14`** (rc.9 is deprecated on npm for GHSA-qvv5-jq5g-4cgg, message spoofing). The newsletter/channel media patch was re-based: `patches/@whiskeysockets+baileys+7.0.0-rc14.patch` keeps the newsletter upload endpoint (`/newsletter/newsletter-*`, `server_thumb_gen`), the `/o1/`→`/m1/` directPath fix and the unencrypted-media download fallback; the `mediatype` attribute part is upstream now. `package-lock.json` is in sync with the pin.
+- **Broadcast engine rewritten for number safety** (`src/modules/whatsapp/broadcast.ts`):
+  - recipients are de-duplicated and verified with `onWhatsApp()` first; unregistered numbers are skipped instead of sent
+  - minimum delay 3s, default 8s (was 2s), random jitter up to +60%
+  - cooldown after every batch (default 20 messages / 60s, configurable)
+  - "typing…" presence before each message
+  - media is fetched once instead of being re-downloaded per recipient
+  - circuit breaker after 5 consecutive send failures
+  - maximum 5000 recipients per number per broadcast (the daily limit is the real governor)
+  - new `POST /api/messages/{sessionId}/broadcast/{broadcastId}/cancel` and a Stop button in the dashboard
+  - new `GET /api/messages/{sessionId}/broadcast` returning the server-side safety limits
+- **Session reconnect**: exponential backoff (3s → 60s, 5 attempts) instead of 3 × 3s; `515 restartRequired` reconnects immediately without counting as a failure. The disconnect reason is logged and the session owner receives a dashboard notification explaining a logout or auto-stop.
+- **Retry receipts**: `getMessage` is now provided to Baileys (10-minute in-memory cache of sent messages), so recipients whose device requests a re-send actually get the message.
+- **`markOnlineOnConnect`** defaults to off unless "Always Online" is enabled in Bot Settings (permanently-online devices are an automation signal and hide notifications on the phone).
+
+### Performance
+- **Webhook dispatch cache**: `dispatchWebhook()` ran 4 queries per inbound message / receipt / contact update even when no webhook existed. Matching webhooks are now cached per session for 30s (invalidated on webhook create/update/delete).
+- **Webhook log cleanup** runs at most every 10 minutes per webhook and deletes by timestamp cutoff instead of loading every log id.
+- **Bot command handler** reuses the BotConfig already loaded by the store and checks the prefix before touching the database (previously 2 queries per incoming message).
+- **System monitor** no longer calls `si.diskLayout()` (unused; spawned `lsblk`/`smartctl`/`udevadm` on every poll) and serves a 2s cached snapshot.
+- **Session detail page** polls status/metrics every 15s instead of every 3s (6 `COUNT(*)` queries on the Message table per 3s per open tab). Status changes still arrive instantly over the socket.
+
+### Database
+- `BroadcastLog.error`, `mediaUrl`, `mediaType`, `options`; `BroadcastRecipient.vars`; `SystemConfig.alertsEnabled`, `alertTelegramToken`, `alertTelegramChatId`, `alertEmail`, `alertOnLogout`, `alertOnBroadcast`, `alertOnLimit`; `BotConfig.dailyBroadcastLimit`, `quietHoursStart`, `quietHoursEnd`, `optOutEnabled`, `optOutKeywords`, `optOutReply`; `Contact.optedOut`, `optedOutAt` — run `npx prisma db push` (done automatically by `start.sh`).
+
 ## [v1.6.4] - 2026-07-12
 
 ### Added

@@ -123,11 +123,12 @@ export default function SessionDetailPage() {
             setUptime(prev => prev + 1);
         }, 1000);
 
-        // Fetch metrics periodically
+        // Fetch metrics periodically. Each call runs COUNT queries over the Message table,
+        // so keep this slow — status changes arrive instantly over the socket anyway.
         fetchMetrics();
-        const metricsInterval = setInterval(fetchMetrics, 3000);
+        const metricsInterval = setInterval(fetchMetrics, 15000);
 
-        // Polling fallback: check session status every 3 seconds to guarantee instant UI update even without socket
+        // Polling fallback (socket is the primary channel): re-check session status every 15 seconds
         const statusPollInterval = setInterval(async () => {
             try {
                 const res = await fetch(`/api/sessions/${sessionId}`);
@@ -151,7 +152,7 @@ export default function SessionDetailPage() {
             } catch (e) {
                 // silent
             }
-        }, 3000);
+        }, 15000);
 
         return () => {
             socketInstance.disconnect();

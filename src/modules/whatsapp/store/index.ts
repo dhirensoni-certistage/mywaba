@@ -3,6 +3,7 @@ import type { WASocket, WAMessage, Contact } from "@whiskeysockets/baileys";
 import { normalizeMessageContent } from "@whiskeysockets/baileys";
 import { onMessageReceived, onMessageSent, dispatchWebhook, downloadAndSaveMedia } from "@/lib/webhook";
 import { handleBotCommand, setSessionStartTime } from "../bot/command-handler";
+import { handleOptOut } from "../safety";
 import { resolveToPhoneJid, isLidJid, normalizeJid } from "@/lib/jid-utils";
 
 import { Server } from "socket.io";
@@ -71,7 +72,11 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
                 // Execute Bot Commands (Only for Notify / New Messages)
                 if (type === 'notify' && savedMessage) {
                     // Run in background, don't await strictly to not block saving
-                    handleBotCommand(sock, sessionId, msg).catch(e => logger.error("Bot", "Bot Handler Error", e));
+                    handleBotCommand(sock, sessionId, msg, config ?? null).catch(e => logger.error("Bot", "Bot Handler Error", e));
+                    // STOP / UNSUBSCRIBE replies flag the contact so broadcasts skip them
+                    if (!msg.key.fromMe) {
+                        handleOptOut(sock, dbSessionId, msg, config).catch(e => logger.error("Safety", "Opt-out error", e));
+                    }
                 }
             } catch (error) {
                 logger.error("Store", "Error saving message", error);

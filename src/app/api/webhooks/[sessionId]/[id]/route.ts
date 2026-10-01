@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
+import { getAuthenticatedUser, canAccessSession, forbidStaff } from "@/lib/api-auth";
+import { invalidateWebhookCache } from "@/lib/webhook";
 
 export async function PUT(
     request: NextRequest,
@@ -10,6 +11,8 @@ export async function PUT(
     if (!user) {
         return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
     }
+    const staffDenied = forbidStaff(user, "manage webhooks");
+    if (staffDenied) return staffDenied;
     
     const { sessionId, id } = await params;
 
@@ -51,6 +54,7 @@ export async function PUT(
             return NextResponse.json({ status: false, message: "Webhook not found", error: "Webhook not found" }, { status: 404 });
         }
 
+        invalidateWebhookCache();
         const webhook = await prisma.webhook.update({
             where: { id },
             data: {
@@ -77,6 +81,8 @@ export async function DELETE(
     if (!user) {
         return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
     }
+    const staffDenied = forbidStaff(user, "manage webhooks");
+    if (staffDenied) return staffDenied;
     
     const { sessionId, id } = await params;
 
@@ -114,6 +120,7 @@ export async function DELETE(
             return NextResponse.json({ status: false, message: "Webhook not found", error: "Webhook not found" }, { status: 404 });
         }
 
+        invalidateWebhookCache();
         await prisma.webhook.delete({ where: { id } });
 
         return NextResponse.json({ status: true, message: "Operation successful" });

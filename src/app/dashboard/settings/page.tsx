@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { RefreshCw, Save, AlertCircle } from "lucide-react";
+import { RefreshCw, Save, AlertCircle, Bell, Send } from "lucide-react";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
@@ -22,6 +22,18 @@ export default function SettingsPage() {
         enableRegistration: true
     });
     const [systemLoading, setSystemLoading] = useState(false);
+    const [alerts, setAlerts] = useState({
+        alertsEnabled: true,
+        alertTelegramToken: "",
+        alertTelegramChatId: "",
+        alertEmail: "",
+        alertOnLogout: true,
+        alertOnBroadcast: true,
+        alertOnLimit: true,
+    });
+    const [smtpConfigured, setSmtpConfigured] = useState(false);
+    const [alertsLoading, setAlertsLoading] = useState(false);
+    const [testingAlert, setTestingAlert] = useState(false);
     const [timezones, setTimezones] = useState<string[]>(["UTC", "Asia/Jakarta", "Asia/Makassar", "Asia/Jayapura"]);
 
     useEffect(() => {
@@ -53,10 +65,61 @@ export default function SettingsPage() {
                         timezone: data.timezone || "Asia/Jakarta",
                         enableRegistration: data.enableRegistration !== undefined ? data.enableRegistration : true
                     });
+                    setAlerts({
+                        alertsEnabled: data.alertsEnabled ?? true,
+                        alertTelegramToken: data.alertTelegramToken || "",
+                        alertTelegramChatId: data.alertTelegramChatId || "",
+                        alertEmail: data.alertEmail || "",
+                        alertOnLogout: data.alertOnLogout ?? true,
+                        alertOnBroadcast: data.alertOnBroadcast ?? true,
+                        alertOnLimit: data.alertOnLimit ?? true,
+                    });
+                    setSmtpConfigured(Boolean(data.smtpConfigured));
                 }
             })
             .catch(() => { });
     }, []);
+
+    const handleSaveAlerts = async () => {
+        setAlertsLoading(true);
+        try {
+            const res = await fetch('/api/settings/system', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(alerts)
+            });
+            if (res.ok) toast.success("Alert settings saved");
+            else toast.error("Failed to save alert settings");
+        } catch {
+            toast.error("Failed to save alert settings");
+        } finally {
+            setAlertsLoading(false);
+        }
+    };
+
+    const handleTestAlert = async () => {
+        setTestingAlert(true);
+        try {
+            // Save first so the test uses what is on screen
+            await fetch('/api/settings/system', { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(alerts) });
+            const res = await fetch('/api/settings/alerts/test', { method: "POST" });
+            const data = await res.json();
+            if (res.ok && data.status) {
+                const r = data.data || {};
+                const parts = [
+                    r.telegram !== undefined ? `Telegram: ${r.telegram ? "sent" : "failed"}` : null,
+                    r.email !== undefined ? `Email: ${r.email ? "sent" : "failed"}` : null,
+                ].filter(Boolean);
+                toast.success(`Test alert — ${parts.join(", ")}`);
+            } else {
+                toast.error(data.message || "Test failed");
+            }
+        } catch {
+            toast.error("Test failed");
+        } finally {
+            setTestingAlert(false);
+        }
+    };
 
     const handleSaveSystem = async () => {
         setSystemLoading(true);
@@ -192,6 +255,77 @@ export default function SettingsPage() {
                         <Button onClick={handleSaveSystem} disabled={systemLoading || !isSuperAdmin}>
                             {systemLoading ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
                             Save Configuration
+                        </Button>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Alerts */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Bell className="h-5 w-5" /> Alerts (Telegram / Email)</CardTitle>
+                    <CardDescription>
+                        Get notified outside the dashboard when a WhatsApp session is logged out or auto-stopped, when a broadcast stops or has failures, and when a number has used 80% of its daily limit.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                    <div className="flex items-center justify-between border p-3 rounded-lg">
+                        <Label htmlFor="alerts-enabled" className="flex flex-col space-y-1">
+                            <span className="font-semibold">Enable alerts</span>
+                            <span className="font-normal text-xs text-muted-foreground">Master switch for all channels below. Dashboard notifications are always created.</span>
+                        </Label>
+                        <Switch id="alerts-enabled" checked={alerts.alertsEnabled} disabled={!isSuperAdmin}
+                            onCheckedChange={c => setAlerts(prev => ({ ...prev, alertsEnabled: c }))} />
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label>Telegram bot token</Label>
+                            <input className={inputClass} type="password" placeholder="123456789:AAH..." value={alerts.alertTelegramToken} disabled={!isSuperAdmin}
+                                onChange={e => setAlerts(prev => ({ ...prev, alertTelegramToken: e.target.value }))} />
+                            <p className="text-xs text-muted-foreground">Create a bot with @BotFather in Telegram and paste its token.</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Telegram chat id</Label>
+                            <input className={inputClass} placeholder="-1001234567890 or 987654321" value={alerts.alertTelegramChatId} disabled={!isSuperAdmin}
+                                onChange={e => setAlerts(prev => ({ ...prev, alertTelegramChatId: e.target.value }))} />
+                            <p className="text-xs text-muted-foreground">Send any message to the bot (or add it to a group), then open <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> to read the chat id.</p>
+                        </div>
+                        <div className="space-y-2 sm:col-span-2">
+                            <Label>Alert email(s)</Label>
+                            <input className={inputClass} placeholder="you@company.com, ops@company.com" value={alerts.alertEmail} disabled={!isSuperAdmin}
+                                onChange={e => setAlerts(prev => ({ ...prev, alertEmail: e.target.value }))} />
+                            <p className={`text-xs ${smtpConfigured ? "text-muted-foreground" : "text-yellow-600"}`}>
+                                {smtpConfigured
+                                    ? "SMTP is configured on the server."
+                                    : "Email needs SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (and optional SMTP_FROM) in the server .env — not set yet. Telegram works without any server change."}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="flex items-center justify-between border p-3 rounded-lg">
+                            <Label htmlFor="al-logout" className="text-sm">Session logout / stop</Label>
+                            <Switch id="al-logout" checked={alerts.alertOnLogout} disabled={!isSuperAdmin} onCheckedChange={c => setAlerts(prev => ({ ...prev, alertOnLogout: c }))} />
+                        </div>
+                        <div className="flex items-center justify-between border p-3 rounded-lg">
+                            <Label htmlFor="al-broadcast" className="text-sm">Broadcast failures</Label>
+                            <Switch id="al-broadcast" checked={alerts.alertOnBroadcast} disabled={!isSuperAdmin} onCheckedChange={c => setAlerts(prev => ({ ...prev, alertOnBroadcast: c }))} />
+                        </div>
+                        <div className="flex items-center justify-between border p-3 rounded-lg">
+                            <Label htmlFor="al-limit" className="text-sm">Daily limit at 80%</Label>
+                            <Switch id="al-limit" checked={alerts.alertOnLimit} disabled={!isSuperAdmin} onCheckedChange={c => setAlerts(prev => ({ ...prev, alertOnLimit: c }))} />
+                        </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                        <Button onClick={handleSaveAlerts} disabled={alertsLoading || !isSuperAdmin}>
+                            {alertsLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                            Save Alert Settings
+                        </Button>
+                        <Button variant="outline" onClick={handleTestAlert} disabled={testingAlert || !isSuperAdmin}>
+                            {testingAlert ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                            Send Test Alert
                         </Button>
                     </div>
                 </CardContent>

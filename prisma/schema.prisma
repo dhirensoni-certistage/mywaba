@@ -85,6 +85,8 @@ model Contact {
   remoteJidAlt String? // Alternate JID (e.g. Phone if JID is LID)
   profilePic  String?  @db.Text
   data        Json?    // Detailed contact data
+  optedOut    Boolean  @default(false) // Replied STOP — excluded from broadcasts
+  optedOutAt  DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -283,6 +285,14 @@ model BotConfig {
   autoRead        Boolean @default(false)
   alwaysOnline    Boolean @default(false)
 
+  // Broadcast Safety (number protection)
+  dailyBroadcastLimit Int     @default(200)  // Max broadcast messages per rolling 24h for this session
+  quietHoursStart     Int?                   // Hour 0-23 in system timezone; null = no quiet hours
+  quietHoursEnd       Int?                   // Hour 0-23 in system timezone
+  optOutEnabled       Boolean @default(true) // Honour STOP/UNSUBSCRIBE replies
+  optOutKeywords      Json?                  // ["STOP", "UNSUBSCRIBE"] (case-insensitive, exact match)
+  optOutReply         String? @db.Text       // Optional confirmation sent once when someone opts out
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -296,6 +306,15 @@ model SystemConfig {
   faviconUrl         String?
   timezone           String   @default("Asia/Jakarta")
   enableRegistration Boolean  @default(true)
+
+  // Alerts (session logout / auto-stop, broadcast problems, daily limit nearly used)
+  alertsEnabled        Boolean @default(true)
+  alertTelegramToken   String?            // Telegram bot token
+  alertTelegramChatId  String?            // Telegram chat / group id
+  alertEmail           String?            // Comma-separated recipients (SMTP_* env must be set)
+  alertOnLogout        Boolean @default(true)
+  alertOnBroadcast     Boolean @default(true)
+  alertOnLimit         Boolean @default(true)
   
   updatedAt          DateTime @updatedAt
 }
@@ -367,8 +386,12 @@ model BroadcastLog {
   total       Int
   sent        Int                 @default(0)
   failed      Int                 @default(0)
-  status      String              @default("running") // running, completed, cancelled
+  status      String              @default("running") // running, completed, cancelled, failed
   delay       Int                 @default(2000)
+  mediaUrl    String?             @db.Text // Kept so a failed run can be retried with the same media
+  mediaType   String?
+  options     Json?               // { batchSize, batchPauseMs, simulateTyping, shuffle, spreadHours, buttons, footer, retryOf }
+  error       String?             @db.Text // Why the broadcast stopped early (logout, disconnect, cancelled...)
   startedAt   DateTime            @default(now())
   completedAt DateTime?
 
@@ -382,6 +405,7 @@ model BroadcastRecipient {
   id              String       @id @default(cuid())
   broadcastLogId  String
   jid             String
+  vars            Json?        // Per-recipient template variables ({name}, {city}...) so retries stay personalised
   status          String       @default("pending") // pending, sent, failed
   error           String?      @db.Text
   sentAt          DateTime?

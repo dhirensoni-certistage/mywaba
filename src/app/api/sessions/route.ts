@@ -1,7 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { waManager } from "@/modules/whatsapp/manager";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser, getAccessibleSessions } from "@/lib/api-auth";
+import { getAuthenticatedUser, getAccessibleSessions, forbidStaff } from "@/lib/api-auth";
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +29,8 @@ export async function POST(request: NextRequest) {
         if (!user) {
             return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
         }
+        const staffDenied = forbidStaff(user, "create sessions");
+        if (staffDenied) return staffDenied;
 
         const body = await request.json();
         const { name, sessionId } = body;

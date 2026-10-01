@@ -42,7 +42,9 @@ export function setSessionStartTime(sessionId: string) {
 export async function handleBotCommand(
     sock: WASocket | undefined,
     sessionId: string,
-    msg: WAMessage
+    msg: WAMessage,
+    /** BotConfig already loaded by the caller (saves two DB queries per incoming message). */
+    preloadedConfig?: any
 ) {
     if (!sock || !msg.message || !msg.key.remoteJid) return;
 
@@ -67,19 +69,26 @@ export async function handleBotCommand(
     // We'll do a proper prefix check after loading config
     if (!text || text.length === 0) return;
 
-    // Fetch session first
-    const session = await prisma.session.findUnique({
-        where: { sessionId },
-        select: { id: true }
-    });
+    let botConfig = preloadedConfig;
+    if (botConfig !== undefined) {
+        // Config already loaded by the store: check the prefix before touching the database.
+        const knownPrefix = (botConfig?.prefix as string | undefined) || DEFAULT_CONFIG.prefix;
+        if (!text.startsWith(knownPrefix)) return;
+    } else {
+        // Fetch session first
+        const session = await prisma.session.findUnique({
+            where: { sessionId },
+            select: { id: true }
+        });
 
-    if (!session) return;
+        if (!session) return;
 
-    // Fetch BotConfig separately
-    // @ts-ignore - Prisma Client types might lag in IDE
-    const botConfig = await (prisma as any).botConfig.findUnique({
-        where: { sessionId: session.id }
-    });
+        // Fetch BotConfig separately
+        // @ts-ignore - Prisma Client types might lag in IDE
+        botConfig = await (prisma as any).botConfig.findUnique({
+            where: { sessionId: session.id }
+        });
+    }
 
     const config = botConfig || DEFAULT_CONFIG;
 

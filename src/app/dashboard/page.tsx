@@ -16,19 +16,21 @@ import {
     Zap,
 } from "lucide-react";
 
-import { auth } from "@/lib/auth";
+import { getAuthenticatedUserForAction } from "@/lib/server-action-auth";
 import { getAccessibleSessions } from "@/lib/api-auth";
 import { redirect } from "next/navigation";
 
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
-    const session = await auth();
-    if (!session?.user) {
-        redirect("/login");
+    // Role is read from the database, not from the login token: a role change made in
+    // Users (e.g. SUPERADMIN -> STAFF) must apply immediately, not after the next login.
+    const user = await getAuthenticatedUserForAction();
+    if (!user) {
+        redirect("/auth/login");
     }
 
-    const sessions = await getAccessibleSessions(session.user.id!, session.user.role || "OWNER");
+    const sessions = await getAccessibleSessions(user.id, user.role);
 
     const totalSessions = sessions.length;
     const connectedSessions = sessions.filter(s => s.status === 'CONNECTED').length;

@@ -45,7 +45,7 @@ Before you can use any automation features, you must link a WhatsApp account.
 
 ### 1. Broadcast Engine
 - Send bulk messages to multiple numbers or groups.
-- **Anti-Ban Protection**: The system automatically adds random delays between sends.
+- **Anti-Ban Protection**: Numbers are verified on WhatsApp before sending, every message gets a random delay (minimum 3s, 8s default, +60% jitter), the engine pauses between batches, simulates typing, stops automatically if the session disconnects or fails repeatedly, and can be cancelled from the dashboard. Upload an Excel/CSV with `phone` + `name` (+ any columns) and personalise with `{name}` / `{column}`; spread big lists over hours or across several connected numbers. See [Broadcast Safety](BROADCAST_SAFETY.md).
 - **Recipients**: Paste comma-separated numbers or select a pre-synced Group.
 
 ### 2. Group Management

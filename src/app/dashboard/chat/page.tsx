@@ -1,15 +1,16 @@
-import { auth } from "@/lib/auth";
+import { getAuthenticatedUserForAction } from "@/lib/server-action-auth";
 import { ChatInterface } from "@/components/chat/chat-interface";
 import { ChatLayoutClient } from "@/components/chat/chat-layout-client";
 import { cookies } from "next/headers";
 import { canAccessSession } from "@/lib/api-auth";
 import { SessionGuard } from "@/components/dashboard/session-guard";
 
-export default async function ChatPage() {
-    const session = await auth();
-    console.log("ChatPage Session (Role debug):", session?.user?.role);
+export const dynamic = "force-dynamic";
 
-    if (!session?.user?.id) return <div>Unauthorized</div>;
+export default async function ChatPage() {
+    const user = await getAuthenticatedUserForAction();
+
+    if (!user) return <div>Unauthorized</div>;
 
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;
@@ -17,7 +18,7 @@ export default async function ChatPage() {
 
     if (sessionId) {
         // Validate access
-        const hasAccess = await canAccessSession(session.user.id, session.user.role, sessionId);
+        const hasAccess = await canAccessSession(user.id, user.role, sessionId);
         if (hasAccess) {
             // Ideally also check if CONNECTED but canAccessSession checks ownership.
             // We can do an extra check if needed.
