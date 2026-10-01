@@ -53,7 +53,13 @@ export async function GET(
             spamDelayMax: 3000,
             welcomeMessage: null,
             autoRead: false,
-            alwaysOnline: false
+            alwaysOnline: false,
+            dailyBroadcastLimit: 200,
+            quietHoursStart: null,
+            quietHoursEnd: null,
+            optOutEnabled: true,
+            optOutKeywords: null,
+            optOutReply: null
         };
 
         return NextResponse.json({ status: true, message: "Bot config fetched successfully", data: session.botConfig });
@@ -86,6 +92,30 @@ export async function POST(
 
         if (!session) return NextResponse.json({ status: false, message: "Session not found", error: "Session not found" }, { status: 404 });
 
+        // Broadcast Safety fields — validated/clamped; undefined means "leave unchanged"
+        const toHour = (v: unknown) => {
+            if (v === undefined) return undefined;
+            if (v === null || v === "") return null;
+            const n = Number(v);
+            return Number.isFinite(n) ? Math.max(0, Math.min(23, Math.round(n))) : null;
+        };
+        const safetyFields: Record<string, unknown> = {};
+        if (body.dailyBroadcastLimit !== undefined) {
+            const n = Number(body.dailyBroadcastLimit);
+            safetyFields.dailyBroadcastLimit = Number.isFinite(n) ? Math.max(0, Math.min(5000, Math.round(n))) : 200;
+        }
+        if (body.quietHoursStart !== undefined) safetyFields.quietHoursStart = toHour(body.quietHoursStart);
+        if (body.quietHoursEnd !== undefined) safetyFields.quietHoursEnd = toHour(body.quietHoursEnd);
+        if (body.optOutEnabled !== undefined) safetyFields.optOutEnabled = Boolean(body.optOutEnabled);
+        if (body.optOutKeywords !== undefined) {
+            const raw = Array.isArray(body.optOutKeywords)
+                ? body.optOutKeywords
+                : String(body.optOutKeywords || "").split(",");
+            const list = raw.map((k: unknown) => String(k).trim()).filter(Boolean).slice(0, 20);
+            safetyFields.optOutKeywords = list.length > 0 ? list : null;
+        }
+        if (body.optOutReply !== undefined) safetyFields.optOutReply = body.optOutReply ? String(body.optOutReply).slice(0, 1000) : null;
+
         // Upsert Config
         // @ts-ignore
         const config = await (prisma as any).botConfig.upsert({
@@ -115,6 +145,7 @@ export async function POST(
                 welcomeMessage: body.welcomeMessage || null,
                 autoRead: body.autoRead ?? false,
                 alwaysOnline: body.alwaysOnline ?? false,
+                ...safetyFields,
             },
             update: {
                 botMode: body.botMode,
@@ -139,6 +170,7 @@ export async function POST(
                 welcomeMessage: body.welcomeMessage,
                 autoRead: body.autoRead,
                 alwaysOnline: body.alwaysOnline,
+                ...safetyFields,
             }
         });
 

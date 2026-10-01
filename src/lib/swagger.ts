@@ -1132,14 +1132,15 @@ All endpoints require authentication via:
                                                 items: { type: "string" },
                                                 example: ["919876543210@s.whatsapp.net", "919876543211@s.whatsapp.net"]
                                             },
-                                            message: { type: "string", example: "Hi {name}, this is a reminder about Friday's seminar." },
+                                            message: { type: "string", example: "{Hi|Hello} {name|there}, this is a reminder about Friday's seminar.", description: "Supports {name} / {name|fallback} placeholders and {a|b|c} spintax so each message differs." },
                                             mediaUrl: { type: "string", nullable: true, description: "Optional media URL (absolute, or a /api/media/... path)" },
                                             mediaType: { type: "string", nullable: true, enum: ["image", "video", "audio", "document"] },
                                             delay: { type: "number", description: "Delay between messages in ms. Clamped to 3000–120000 (default 8000)." },
                                             batchSize: { type: "number", description: "Messages per batch before a cooldown. 5–100 (default 20)." },
                                             batchPauseMs: { type: "number", description: "Cooldown between batches in ms. 15000–600000 (default 60000)." },
                                             simulateTyping: { type: "boolean", description: "Send 'composing' presence before each message (default true)." },
-                                            validateNumbers: { type: "boolean", description: "Skip numbers not registered on WhatsApp (default true)." }
+                                            validateNumbers: { type: "boolean", description: "Skip numbers not registered on WhatsApp (default true)." },
+                                            shuffle: { type: "boolean", description: "Send in random order (default true)." }
                                         }
                                     }
                                 }
@@ -1168,7 +1169,7 @@ All endpoints require authentication via:
                                     }
                                 }
                             },
-                            400: { description: "No valid recipients, too many recipients (>500) or media could not be fetched" },
+                            400: { description: "No valid recipients, too many recipients (>500), daily limit reached, or media could not be fetched" },
                             401: { $ref: "#/components/responses/Unauthorized" },
                             403: { $ref: "#/components/responses/Forbidden" },
                             503: { $ref: "#/components/responses/SessionNotReady" },
@@ -1177,8 +1178,8 @@ All endpoints require authentication via:
                     },
                     get: {
                         tags: ["Messaging"],
-                        summary: "Get broadcast safety limits",
-                        description: "Returns the server-side limits (min/max delay, batch size, cooldown, max recipients) the dashboard mirrors.",
+                        summary: "Get broadcast safety limits and number health",
+                        description: "Returns the server-side limits (min/max delay, batch size, cooldown, max recipients) plus this session's health: messages sent in the last 24h vs the daily limit, quiet hours, opted-out contact count and last disconnect reason.",
                         parameters: [
                             { name: "sessionId", in: "path", required: true, schema: { type: "string" } }
                         ],

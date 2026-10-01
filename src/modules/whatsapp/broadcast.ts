@@ -2,6 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { waManager } from "./manager";
 import type { AnyMessageContent } from "@whiskeysockets/baileys";
+import {
+    loadSafetyConfig, countSentLast24h, getSystemTimezone, currentHourInTz, isInQuietHours, formatHour,
+    loadContactsForJids, personalize, hasPersonalization, type SafetyConfig
+} from "./safety";
 
 /**
  * Broadcast engine — anti-ban aware bulk sender.
@@ -68,6 +72,47 @@ export interface BroadcastOptions {
     simulateTyping?: boolean;
     /** Verify numbers with onWhatsApp() before sending. Default true. */
     validateNumbers?: boolean;
+    /** Send in random order instead of list order. Default true. */
+    shuffle?: boolean;
+}
+
+export interface BroadcastHealth {
+    sentLast24h: number;
+    dailyLimit: number;
+    remaining: number;
+    quietHours: { start: number | null; end: number | null; active: boolean; label: string | null };
+    optedOutCount: number;
+    timezone: string;
+    sessionStatus: string;
+    lastDisconnectReason: string | null;
+}
+
+/** Snapshot of the number's broadcast budget + protections — shown on the Broadcast page. */
+export async function getBroadcastHealth(sessionId: string): Promise<BroadcastHealth> {
+    const [{ dbSessionId, safety }, sentLast24h, timezone] = await Promise.all([
+        loadSafetyConfig(sessionId),
+        countSentLast24h(sessionId),
+        getSystemTimezone()
+    ]);
+    const optedOutCount = dbSessionId
+        ? await prisma.contact.count({ where: { sessionId: dbSessionId, optedOut: true } })
+        : 0;
+    const hour = currentHourInTz(timezone);
+    const active = isInQuietHours(hour, safety.quietHoursStart, safety.quietHoursEnd);
+    const label = safety.quietHoursStart !== null && safety.quietHoursEnd !== null
+        ? `${formatHour(safety.quietHoursStart)} – ${formatHour(safety.quietHoursEnd)}`
+        : null;
+    const instance = waManager.getInstance(sessionId);
+    return {
+        sentLast24h,
+        dailyLimit: safety.dailyBroadcastLimit,
+        remaining: safety.dailyBroadcastLimit > 0 ? Math.max(0, safety.dailyBroadcastLimit - sentLast24h) : Number.POSITIVE_INFINITY,
+        quietHours: { start: safety.quietHoursStart, end: safety.quietHoursEnd, active, label },
+        optedOutCount,
+        timezone,
+        sessionStatus: instance?.status || "STOPPED",
+        lastDisconnectReason: instance?.lastDisconnectReason || null
+    };
 }
 
 export interface BroadcastProgressPayload {
@@ -269,6 +314,21 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
     const batchPauseMs = clamp(Number(opts.batchPauseMs) || BROADCAST_LIMITS.DEFAULT_BATCH_PAUSE_MS, BROADCAST_LIMITS.MIN_BATCH_PAUSE_MS, BROADCAST_LIMITS.MAX_BATCH_PAUSE_MS);
     const simulateTyping = opts.simulateTyping !== false;
     const validateNumbers = opts.validateNumbers !== false;
+    const shuffle = opts.shuffle !== false;
+
+    // Number protection: daily budget check before anything is queued.
+    const { dbSessionId, safety } = await loadSafetyConfig(sessionId);
+    if (!dbSessionId) throw new Error("Session not found");
+    const sentLast24h = await countSentLast24h(sessionId);
+    if (safety.dailyBroadcastLimit > 0) {
+        const remaining = safety.dailyBroadcastLimit - sentLast24h;
+        if (remaining <= 0) {
+            throw new Error(`Daily limit reached: ${sentLast24h} broadcast messages were already sent in the last 24 hours (limit ${safety.dailyBroadcastLimit}). Wait, or raise the limit in Bot Settings → Broadcast Safety.`);
+        }
+        if (jids.length > remaining) {
+            throw new Error(`Only ${remaining} of your daily limit of ${safety.dailyBroadcastLimit} remain (${sentLast24h} sent in the last 24 hours), but this list has ${jids.length} recipients. Send to at most ${remaining} now, or raise the limit in Bot Settings → Broadcast Safety.`);
+        }
+    }
 
     // Build content first so a bad media URL fails fast instead of per recipient.
     const messageContent = await buildMessageContent(opts);
@@ -296,7 +356,7 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
     emit({ status: "running", sent: 0, failed: 0, progress: 0, current: null, startedAt: log.startedAt.toISOString(), note: validateNumbers ? "Validating numbers…" : null });
 
     // Fire and forget — the HTTP request returns immediately.
-    runBroadcast({ broadcastId, sessionId, jids, messageContent, delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, emit })
+    runBroadcast({ broadcastId, sessionId, dbSessionId, jids, messageContent, template: opts.message || "", delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore: sentLast24h, emit })
         .catch(e => logger.error("Broadcast", `${broadcastId} crashed`, e))
         .finally(() => {
             activeBroadcasts.delete(broadcastId);
@@ -309,18 +369,36 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
 interface RunArgs {
     broadcastId: string;
     sessionId: string;
+    dbSessionId: string;
     jids: string[];
     messageContent: AnyMessageContent;
+    /** Raw text/caption with {name} / {a|b} placeholders. */
+    template: string;
     delayMs: number;
     batchSize: number;
     batchPauseMs: number;
     simulateTyping: boolean;
     validateNumbers: boolean;
+    shuffle: boolean;
+    safety: SafetyConfig;
+    /** Broadcast messages already sent in the trailing 24h when this run started. */
+    sentBefore: number;
     emit: (p: Partial<BroadcastProgressPayload> & { status?: BroadcastStatus }) => void;
 }
 
+/** Personalised copy of the base content for one recipient (text or caption). */
+function contentFor(base: AnyMessageContent, template: string, name: string | null | undefined): AnyMessageContent {
+    if (!hasPersonalization(template)) return base;
+    const text = personalize(template, { name });
+    const anyBase = base as any;
+    if ("text" in anyBase) return { ...anyBase, text } as AnyMessageContent;
+    if ("caption" in anyBase) return { ...anyBase, caption: text } as AnyMessageContent;
+    return base;
+}
+
 async function runBroadcast(args: RunArgs) {
-    const { broadcastId, sessionId, jids, messageContent, delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, emit } = args;
+    const { broadcastId, sessionId, dbSessionId, jids, messageContent, template, delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore, emit } = args;
+    const timezone = await getSystemTimezone();
 
     let sent = 0;
     let failed = 0;
@@ -420,12 +498,49 @@ async function runBroadcast(args: RunArgs) {
             toSend.push(...jids.map(jid => ({ rowJid: jid, targetJid: jid })));
         }
 
+        // ---- Phase 1b: opt-outs + personalisation data ----
+        const contacts = await loadContactsForJids(dbSessionId, toSend.map(t => t.targetJid)).catch(() => new Map());
+        if (safety.optOutEnabled) {
+            for (let i = toSend.length - 1; i >= 0; i--) {
+                const { rowJid, targetJid } = toSend[i];
+                const c = contacts.get(targetJid) || contacts.get(rowJid);
+                if (c?.optedOut) {
+                    toSend.splice(i, 1);
+                    skipped++;
+                    failed++;
+                    errors.push({ jid: rowJid, error: "Recipient opted out (replied STOP) — skipped" });
+                    await markRecipient(rowJid, { status: "failed", error: "Recipient opted out (replied STOP) — skipped" });
+                }
+            }
+            await persistCounters();
+        }
+
+        if (shuffle) {
+            for (let i = toSend.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [toSend[i], toSend[j]] = [toSend[j], toSend[i]];
+            }
+        }
+
         // ---- Phase 2: send ----
         let sentInBatch = 0;
         for (let i = 0; i < toSend.length; i++) {
             const { rowJid, targetJid } = toSend[i];
 
             if (cancelledBroadcasts.has(broadcastId)) { await finish("cancelled"); return; }
+
+            // Daily budget (another broadcast or API sends may have consumed it meanwhile)
+            if (safety.dailyBroadcastLimit > 0 && sentBefore + sent >= safety.dailyBroadcastLimit) {
+                await finish("failed", `Daily send limit of ${safety.dailyBroadcastLimit} reached. ${toSend.length - i} recipient(s) were not sent — continue tomorrow or raise the limit in Bot Settings → Broadcast Safety.`);
+                return;
+            }
+
+            // Quiet hours: hold until the window ends
+            while (isInQuietHours(currentHourInTz(timezone), safety.quietHoursStart, safety.quietHoursEnd)) {
+                if (cancelledBroadcasts.has(broadcastId)) { await finish("cancelled"); return; }
+                emit({ status: "running", sent, failed, skipped, progress: progress(), current: null, note: `Quiet hours (${formatHour(safety.quietHoursStart!)} – ${formatHour(safety.quietHoursEnd!)} ${timezone}) — sending resumes at ${formatHour(safety.quietHoursEnd!)}` });
+                await sleep(30000);
+            }
 
             // Batch cooldown
             if (sentInBatch >= batchSize) {
@@ -455,13 +570,14 @@ async function runBroadcast(args: RunArgs) {
                     try {
                         await socket.presenceSubscribe(targetJid);
                         await socket.sendPresenceUpdate("composing", targetJid);
-                        const textLen: number = (messageContent as any).text?.length || (messageContent as any).caption?.length || 40;
+                        const textLen: number = template.length || (messageContent as any).text?.length || (messageContent as any).caption?.length || 40;
                         await sleep(clamp(Math.round(textLen * 25), 1200, 4500) + randomBetween(0, 800));
                         await socket.sendPresenceUpdate("paused", targetJid);
                     } catch { /* presence is best effort */ }
                 }
 
-                await socket.sendMessage(targetJid, messageContent);
+                const contact = contacts.get(targetJid) || contacts.get(rowJid);
+                await socket.sendMessage(targetJid, contentFor(messageContent, template, contact?.name));
                 sent++;
                 sentInBatch++;
                 consecutiveFailures = 0;

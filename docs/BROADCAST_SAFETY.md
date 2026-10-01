@@ -20,9 +20,16 @@ LOGGED OUT and every remaining send fails. Repeated flags lead to a **temporary 
 | Typing simulation | on | Presence "composing" before each message, proportional to text length. |
 | Auto-abort | always | If the session disconnects the engine waits up to 2 min for a reconnect, then stops and records the reason. 5 consecutive failures also stop the run. |
 | Max recipients | 500 per broadcast | Forces large lists to be split over time. |
+| Daily limit | 200 / rolling 24h | Hard cap per session (Bot Settings → Broadcast Safety). A run that would exceed it is refused before anything is sent. |
+| Quiet hours | off (recommended 10 PM – 8 AM) | Sends pause inside the window, in the system timezone. |
+| Opt-out | on, keywords STOP / UNSUBSCRIBE / STOP ALL / CANCEL | A contact who replies with a keyword is flagged and skipped by every future broadcast; optional confirmation reply. |
+| Personalisation | `{name}`, `{name|fallback}`, `{a|b|c}` | Every message differs; identical texts are a spam signal. |
+| Random order | on | Sequential number blocks are not hit in order. |
 | Cancel | Stop button | Stop a run the moment you see failures. |
 
 These defaults reduce risk; they cannot make unsolicited bulk messaging safe.
+
+The same guide is available inside the dashboard: **Broadcast → Safety Guide** tab (visible to every role, including staff).
 
 ## Volume guidance (conservative, from community experience)
 
@@ -61,5 +68,7 @@ far safer. Messages to numbers that are **not saved in the phone's contacts** ca
 | `Session was logged out by WhatsApp` | 401 device_removed during the run. | Re-link, wait 24h, lower volume. |
 | `Session did not reconnect in time` | Network/phone offline > 2 min. | Check the phone and server network. |
 | `Aborted after 5 consecutive failures` | Circuit breaker. | Inspect the last error; usually connection loss. |
+| `Recipient opted out (replied STOP) — skipped` | Contact is flagged as opted out. | Respect it. Clear the flag in the database only if they re-subscribe. |
+| `Daily send limit of N reached` | Session hit its 24h budget mid-run. | Continue tomorrow, or raise the limit deliberately. |
 | `Cancelled by user` | You pressed Stop. | — |
 | `Server restarted while broadcast was running` | PM2/VPS restart mid-run. | Re-send to the remaining recipients only. |

@@ -10,6 +10,12 @@
 - **Stale role in server components**: Dashboard and chat pages read the role from the login token. A user demoted from SUPERADMIN kept superadmin visibility until re-login. Server components now read the role from the database.
 - **Stale session selection across accounts**: The `sessionId` cookie is cleared when it points to a session the current user cannot access.
 
+### Added
+- **Broadcast Safety settings** (Bot Settings → Broadcast Safety, new `BotConfig` columns): per-session **daily broadcast limit** (rolling 24h, default 200; a run that would exceed it is refused up front and stopped mid-run if other sends consume the budget), **quiet hours** (sends pause inside the window, system timezone) and **opt-out handling** (contacts who reply STOP / UNSUBSCRIBE / STOP ALL / CANCEL are flagged via `Contact.optedOut` and skipped by every future broadcast, with an optional confirmation reply).
+- **Personalisation & spintax** in broadcast text/captions: `{name}`, `{name|fallback}` and `{option a|option b}` so no two messages are identical. Recipients are sent in random order by default.
+- **Number Health card** on the Broadcast page: sent in last 24h vs limit, quiet-hours state, opted-out count, last disconnect reason. `GET /api/messages/{sessionId}/broadcast` now returns limits + health.
+- **Safety Guide tab** on the Broadcast page, visible to every role including staff, with the ban-avoidance guidance from `docs/BROADCAST_SAFETY.md`.
+
 ### Changed
 - **Broadcast engine rewritten for number safety** (`src/modules/whatsapp/broadcast.ts`):
   - recipients are de-duplicated and verified with `onWhatsApp()` first; unregistered numbers are skipped instead of sent
@@ -33,7 +39,7 @@
 - **Session detail page** polls status/metrics every 15s instead of every 3s (6 `COUNT(*)` queries on the Message table per 3s per open tab). Status changes still arrive instantly over the socket.
 
 ### Database
-- `BroadcastLog.error` (nullable text) — run `npx prisma db push` (done automatically by `start.sh`).
+- `BroadcastLog.error` (nullable text); `BotConfig.dailyBroadcastLimit`, `quietHoursStart`, `quietHoursEnd`, `optOutEnabled`, `optOutKeywords`, `optOutReply`; `Contact.optedOut`, `optedOutAt` — run `npx prisma db push` (done automatically by `start.sh`).
 
 ## [v1.6.4] - 2026-07-12
 

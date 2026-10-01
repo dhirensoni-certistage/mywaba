@@ -85,6 +85,8 @@ model Contact {
   remoteJidAlt String? // Alternate JID (e.g. Phone if JID is LID)
   profilePic  String?  @db.Text
   data        Json?    // Detailed contact data
+  optedOut    Boolean  @default(false) // Replied STOP — excluded from broadcasts
+  optedOutAt  DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -282,6 +284,14 @@ model BotConfig {
   welcomeMessage  String? @db.Text
   autoRead        Boolean @default(false)
   alwaysOnline    Boolean @default(false)
+
+  // Broadcast Safety (number protection)
+  dailyBroadcastLimit Int     @default(200)  // Max broadcast messages per rolling 24h for this session
+  quietHoursStart     Int?                   // Hour 0-23 in system timezone; null = no quiet hours
+  quietHoursEnd       Int?                   // Hour 0-23 in system timezone
+  optOutEnabled       Boolean @default(true) // Honour STOP/UNSUBSCRIBE replies
+  optOutKeywords      Json?                  // ["STOP", "UNSUBSCRIBE"] (case-insensitive, exact match)
+  optOutReply         String? @db.Text       // Optional confirmation sent once when someone opts out
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

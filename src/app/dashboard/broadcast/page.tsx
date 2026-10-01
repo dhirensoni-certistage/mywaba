@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { RefreshCw, Send, CheckCircle2, XCircle, Radio, Clock, AlertTriangle, History, Eye, Calendar, Ban, ShieldCheck, Info } from "lucide-react";
+import { RefreshCw, Send, CheckCircle2, XCircle, Radio, Clock, AlertTriangle, History, Eye, Calendar, Ban, ShieldCheck, Info, Shuffle, Gauge, MoonStar, UserX, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/components/dashboard/session-provider";
 import { SessionGuard } from "@/components/dashboard/session-guard";
@@ -33,6 +33,17 @@ interface BroadcastProgress {
     errors?: { jid: string; error: string }[];
     startedAt?: string;
     completedAt?: string;
+}
+
+interface BroadcastHealth {
+    sentLast24h: number;
+    dailyLimit: number;
+    remaining: number | null;
+    quietHours: { start: number | null; end: number | null; active: boolean; label: string | null };
+    optedOutCount: number;
+    timezone: string;
+    sessionStatus: string;
+    lastDisconnectReason: string | null;
 }
 
 // Mirrors BROADCAST_LIMITS on the server (src/modules/whatsapp/broadcast.ts)
@@ -87,7 +98,9 @@ export default function BroadcastPage() {
     const [loading, setLoading] = useState(false);
     const [cancelling, setCancelling] = useState(false);
     const [broadcastProgress, setBroadcastProgress] = useState<BroadcastProgress | null>(null);
-    const [activeTab, setActiveTab] = useState<"new" | "history">("new");
+    const [activeTab, setActiveTab] = useState<"new" | "history" | "guide">("new");
+    const [shuffle, setShuffle] = useState(true);
+    const [health, setHealth] = useState<BroadcastHealth | null>(null);
 
     // History
     const [history, setHistory] = useState<BroadcastLog[]>([]);
@@ -156,6 +169,24 @@ export default function BroadcastPage() {
         }
     }, [activeTab, sessionId, fetchHistory]);
 
+    // Number health (daily budget, quiet hours, opt-outs)
+    const fetchHealth = useCallback(async () => {
+        if (!sessionId) return;
+        try {
+            const res = await fetch(`/api/messages/${sessionId}/broadcast`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data?.data?.health) setHealth(data.data.health);
+            }
+        } catch (e) {
+            console.error("Failed to fetch broadcast health", e);
+        }
+    }, [sessionId]);
+
+    useEffect(() => {
+        fetchHealth();
+    }, [fetchHealth, broadcastProgress?.status]);
+
     // Open detail modal
     const openDetail = async (log: BroadcastLog) => {
         setSelectedLog(log);
@@ -207,7 +238,8 @@ export default function BroadcastPage() {
                     batchSize,
                     batchPauseMs: batchPauseSec * 1000,
                     simulateTyping,
-                    validateNumbers
+                    validateNumbers,
+                    shuffle
                 })
             });
 
@@ -290,7 +322,11 @@ export default function BroadcastPage() {
     const tabs = [
         { id: "new" as const, label: "New Broadcast", icon: Send },
         { id: "history" as const, label: "History", icon: History },
+        { id: "guide" as const, label: "Safety Guide", icon: BookOpen },
     ];
+
+    const budgetPct = health && health.dailyLimit > 0 ? Math.min(100, Math.round((health.sentLast24h / health.dailyLimit) * 100)) : 0;
+    const budgetTone = budgetPct >= 90 ? "text-red-600" : budgetPct >= 70 ? "text-yellow-600" : "text-green-600";
 
     return (
         <SessionGuard>
@@ -350,6 +386,9 @@ export default function BroadcastPage() {
                                 <CardContent className="space-y-4">
                                     <div className="space-y-2">
                                         <Label>Message (Optional if media attached)</Label>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            Use <code className="bg-muted px-1 rounded">{"{name}"}</code> for the contact&apos;s name and <code className="bg-muted px-1 rounded">{"{Hi|Hello|Namaste}"}</code> to vary wording — identical texts to many people are a spam signal.
+                                        </p>
                                         <Textarea
                                             placeholder="Type your message or media caption here..."
                                             className="min-h-[120px]"
@@ -428,7 +467,21 @@ export default function BroadcastPage() {
                                                 </div>
                                                 <Switch checked={simulateTyping} onCheckedChange={setSimulateTyping} disabled={loading} />
                                             </div>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <Label className="text-xs">Random order</Label>
+                                                    <p className="text-[11px] text-muted-foreground">Send in shuffled order instead of list order.</p>
+                                                </div>
+                                                <Switch checked={shuffle} onCheckedChange={setShuffle} disabled={loading} />
+                                            </div>
                                         </div>
+
+                                        {health && health.dailyLimit > 0 && health.remaining !== null && recipientCount > health.remaining && (
+                                            <div className="flex items-start gap-2 text-xs text-red-600 bg-red-500/10 rounded-md px-3 py-2">
+                                                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                                                <span>Only {health.remaining} of today&apos;s limit ({health.dailyLimit}) remain. Reduce the list to {health.remaining} or less, or change the limit in Bot Settings → Broadcast Safety.</span>
+                                            </div>
+                                        )}
 
                                         {recipientCount > 0 && (
                                             <p className="text-xs text-muted-foreground flex items-center gap-1.5">
@@ -450,6 +503,52 @@ export default function BroadcastPage() {
                             </Card>
                         </div>
 
+                        {/* Number health */}
+                        {health && (
+                            <Card>
+                                <CardHeader className="pb-3">
+                                    <CardTitle className="flex items-center gap-2 text-base">
+                                        <Gauge className="h-5 w-5 text-primary" /> Number Health
+                                    </CardTitle>
+                                    <CardDescription>Live view of this session&apos;s broadcast budget and protections. Limits are set in Bot Settings → Broadcast Safety.</CardDescription>
+                                </CardHeader>
+                                <CardContent className="grid gap-3 sm:grid-cols-4">
+                                    <div className="rounded-lg border p-3 sm:col-span-2">
+                                        <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                                            <span>Sent in last 24h</span>
+                                            <span className={`font-mono font-medium ${budgetTone}`}>
+                                                {health.sentLast24h}{health.dailyLimit > 0 ? ` / ${health.dailyLimit}` : " (no limit)"}
+                                            </span>
+                                        </div>
+                                        <Progress value={health.dailyLimit > 0 ? budgetPct : 0} className="h-2" />
+                                        <p className="text-[11px] text-muted-foreground mt-1">
+                                            {health.dailyLimit > 0
+                                                ? `${health.remaining ?? 0} remaining today`
+                                                : "Set a daily limit to protect this number"}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-lg border p-3">
+                                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><MoonStar className="h-3.5 w-3.5" /> Quiet hours</div>
+                                        <p className={`text-sm font-medium mt-1 ${health.quietHours.active ? "text-yellow-600" : ""}`}>
+                                            {health.quietHours.label || "Off"}
+                                        </p>
+                                        <p className="text-[11px] text-muted-foreground">{health.quietHours.active ? "Active now — sends will wait" : health.timezone}</p>
+                                    </div>
+                                    <div className="rounded-lg border p-3">
+                                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><UserX className="h-3.5 w-3.5" /> Opted out</div>
+                                        <p className="text-sm font-medium mt-1">{health.optedOutCount} contact{health.optedOutCount === 1 ? "" : "s"}</p>
+                                        <p className="text-[11px] text-muted-foreground">Replied STOP — always skipped</p>
+                                    </div>
+                                    {health.lastDisconnectReason && (
+                                        <div className="sm:col-span-4 flex items-start gap-2 text-xs text-yellow-700 bg-yellow-500/10 rounded-md px-3 py-2">
+                                            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                                            <span><strong>Last disconnect:</strong> {health.lastDisconnectReason}</span>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        )}
+
                         {/* Safety guidance */}
                         <Card className="border-dashed">
                             <CardContent className="pt-5">
@@ -458,6 +557,7 @@ export default function BroadcastPage() {
                                     <div className="text-xs text-muted-foreground space-y-1">
                                         <p className="font-medium text-foreground text-sm">Protect your number</p>
                                         <p>WhatsApp logs out (and eventually bans) numbers that send identical messages quickly to people who did not opt in. Keep a new number under ~50 cold recipients/day for the first weeks, stay under ~200/day on a warmed-up number, personalise the text, and message only people who expect to hear from you. If a broadcast is logged out mid-way, stop for 24h before trying again.</p>
+                                        <button type="button" onClick={() => setActiveTab("guide")} className="text-primary underline underline-offset-2 font-medium">Read the full Safety Guide →</button>
                                     </div>
                                 </div>
                             </CardContent>
@@ -638,6 +738,92 @@ export default function BroadcastPage() {
                             )}
                         </CardContent>
                     </Card>
+                )}
+
+                {activeTab === "guide" && (
+                    <div className="grid gap-4 lg:grid-cols-2">
+                        <Card className="lg:col-span-2 border-green-500/30 bg-green-50/30 dark:bg-green-950/10">
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <ShieldCheck className="h-5 w-5 text-green-600" /> Why numbers get logged out or banned
+                                </CardTitle>
+                                <CardDescription>Read this before every campaign. It applies to everyone who sends from this account, including staff.</CardDescription>
+                            </CardHeader>
+                            <CardContent className="text-sm space-y-2 text-muted-foreground">
+                                <p>WhatsApp has no bulk-messaging allowance for normal numbers. Every broadcast is a series of ordinary chat messages, and WhatsApp&apos;s anti-spam system judges them like it judges a human: by <strong className="text-foreground">volume</strong>, <strong className="text-foreground">speed</strong>, <strong className="text-foreground">repetition</strong>, <strong className="text-foreground">recipient reaction</strong> (blocks, reports, no replies) and whether the recipients <strong className="text-foreground">know you</strong>.</p>
+                                <p>The first penalty is usually a forced logout of the linked device (code 401 <code className="bg-muted px-1 rounded">device_removed</code>). The session shows as LOGGED OUT and the rest of the broadcast fails. Repeated flags lead to a temporary ban (hours to days) and then a permanent ban of the number.</p>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">Daily volume guidance</CardTitle>
+                                <CardDescription>&quot;Cold&quot; = the recipient has never messaged you. Spread sends across the day, never in one run.</CardDescription>
+                            </CardHeader>
+                            <CardContent className="text-sm">
+                                <table className="w-full text-left">
+                                    <thead className="text-xs text-muted-foreground">
+                                        <tr><th className="pb-2 font-medium">Number age</th><th className="pb-2 font-medium">Cold recipients / day</th></tr>
+                                    </thead>
+                                    <tbody className="[&_td]:py-2 [&_tr]:border-t">
+                                        <tr><td>New number (first 2–3 weeks)</td><td><strong>20–50</strong> — warm up by chatting normally, replying first, joining groups</td></tr>
+                                        <tr><td>Warmed-up number</td><td><strong>100–200</strong></td></tr>
+                                        <tr><td>Number with established two-way chats</td><td><strong>200–500</strong>, only to people who replied before</td></tr>
+                                    </tbody>
+                                </table>
+                                <p className="text-xs text-muted-foreground mt-3">The daily limit in Bot Settings → Broadcast Safety enforces this automatically for this session.</p>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">Content rules of thumb</CardTitle>
+                            </CardHeader>
+                            <CardContent className="text-sm">
+                                <ul className="list-disc pl-5 space-y-1.5 text-muted-foreground">
+                                    <li><strong className="text-foreground">Personalise.</strong> Use <code className="bg-muted px-1 rounded">{"{name}"}</code> and spintax like <code className="bg-muted px-1 rounded">{"{Hi|Hello|Namaste}"}</code> so no two messages are identical.</li>
+                                    <li>One link at most, on your own domain. No link shorteners.</li>
+                                    <li>Put text in the media caption instead of sending two messages per person.</li>
+                                    <li>Keep the first message short and easy to answer. Mention how to opt out (&quot;Reply STOP&quot;).</li>
+                                    <li>Never message people who did not give you their number or agree to hear from you.</li>
+                                </ul>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">Operational rules</CardTitle>
+                            </CardHeader>
+                            <CardContent className="text-sm">
+                                <ul className="list-disc pl-5 space-y-1.5 text-muted-foreground">
+                                    <li>Use a <strong className="text-foreground">dedicated number</strong> for broadcasts, never the main business line.</li>
+                                    <li>Keep the phone online on a stable connection with WhatsApp updated.</li>
+                                    <li>Respect quiet hours (10 PM – 8 AM). Night-time messages get reported.</li>
+                                    <li>If a run is logged out: <strong className="text-foreground">stop for 24 hours</strong>, re-link, resume at half the volume.</li>
+                                    <li>&quot;Forbidden (403)&quot; on reconnect means the number is restricted — wait, do not keep retrying.</li>
+                                    <li>Check <em>History → Detail</em>: the error column says exactly why each recipient failed.</li>
+                                    <li>Large promotional campaigns belong on the official <strong className="text-foreground">WhatsApp Business Platform (Cloud API)</strong> with approved templates. That is the only sanctioned way to do bulk outreach.</li>
+                                </ul>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">What the engine does for you</CardTitle>
+                            </CardHeader>
+                            <CardContent className="text-sm">
+                                <ul className="list-disc pl-5 space-y-1.5 text-muted-foreground">
+                                    <li>Verifies every number on WhatsApp first and skips dead numbers.</li>
+                                    <li>Minimum {LIMITS.MIN_DELAY_MS / 1000}s delay, {LIMITS.DEFAULT_DELAY_MS / 1000}s default, random jitter up to +60%, cooldown after every batch.</li>
+                                    <li>Shows &quot;typing…&quot; before each message and sends in random order.</li>
+                                    <li>Enforces the daily limit and quiet hours; skips contacts who replied STOP.</li>
+                                    <li>Waits through short reconnects, stops cleanly on logout and after 5 consecutive failures, and records the reason.</li>
+                                    <li>Max {LIMITS.MAX_RECIPIENTS} recipients per run; Stop button at any time.</li>
+                                </ul>
+                                <p className="text-xs text-muted-foreground mt-3">These defaults reduce risk. They cannot make unsolicited bulk messaging safe.</p>
+                            </CardContent>
+                        </Card>
+                    </div>
                 )}
 
                 {/* Detail Modal */}
