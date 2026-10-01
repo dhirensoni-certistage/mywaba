@@ -30,6 +30,8 @@ import {
     UserPlus
 } from "lucide-react";
 import { useSidebar } from "./sidebar-context";
+import { useEnabledModules } from "./use-enabled-modules";
+import { isModuleEnabled } from "@/lib/modules";
 import {
     Tooltip,
     TooltipContent,
@@ -113,6 +115,7 @@ export function SidebarNav() {
     const { isCollapsed, toggleCollapse } = useSidebar();
     // @ts-ignore
     const userRole = session?.user?.role;
+    const enabledModules = useEnabledModules();
 
     // Track collapsed groups — all expanded by default
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -134,6 +137,8 @@ export function SidebarNav() {
                         if (item.superadminOnly && userRole !== "SUPERADMIN") return false;
                         if (item.ownerOnly && userRole === "STAFF") return false;
                         if (item.allowedRoles && (!userRole || !item.allowedRoles.includes(userRole))) return false;
+                        // Workspace module setting (Settings → Sidebar & Modules); superadmin sees all
+                        if (enabledModules !== undefined && !isModuleEnabled(item.href, userRole, enabledModules)) return false;
                         return true;
                     });
                     if (visibleItems.length === 0) return null;

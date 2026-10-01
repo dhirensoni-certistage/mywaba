@@ -323,6 +323,9 @@ model SystemConfig {
   alertOnLogout        Boolean @default(true)
   alertOnBroadcast     Boolean @default(true)
   alertOnLimit         Boolean @default(true)
+
+  // Which dashboard modules are visible to non-superadmin users (array of nav hrefs). null = all.
+  enabledModules       Json?
   
   updatedAt          DateTime @updatedAt
 }

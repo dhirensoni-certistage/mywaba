@@ -5,6 +5,7 @@ import { SidebarProvider } from "@/components/dashboard/sidebar-context";
 import { SidebarShell } from "@/components/dashboard/sidebar-shell";
 import { UpdateChecker } from "@/components/dashboard/update-checker";
 import { RegistrationWarning } from "@/components/dashboard/registration-warning";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { prisma } from "@/lib/prisma";
 import { Toaster } from "sonner";
 import pkg from "../../../package.json";
@@ -48,7 +49,9 @@ export default async function DashboardLayout({
                     <div className="flex-1 flex flex-col overflow-hidden min-w-0 relative z-10" suppressHydrationWarning={true}>
                         <Navbar appName={appName} />
                         <main className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 styled-scrollbar">
-                            {children}
+                            <ModuleGate role={session?.user?.role as string | undefined} enabledModules={systemConfig?.enabledModules ?? null}>
+                                {children}
+                            </ModuleGate>
                         </main>
                     </div>
                     <Toaster />

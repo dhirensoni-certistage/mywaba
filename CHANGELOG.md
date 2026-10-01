@@ -11,6 +11,7 @@
 - **Stale session selection across accounts**: The `sessionId` cookie is cleared when it points to a session the current user cannot access.
 
 ### Added
+- **Sidebar & Modules** (Settings, superadmin): choose which dashboard modules a workspace's users see. Presets "Broadcast essentials", "Support desk", "Everything". Unticked modules are hidden from the sidebar/mobile nav and their pages show "not enabled" (`ModuleGate`). Stored in `SystemConfig.enabledModules`; superadmins always see everything; staff never see owner-only modules.
 - **Warm-up mode** (`BotConfig.warmupEnabled/warmupStartedAt`): automatic daily cap for new or recently logged-out numbers — days 1–3 → 20, 4–7 → 50, 8–14 → 100, 15–21 → 150, then the daily limit. Shown in Number Health; Restart button in Bot Settings.
 - **Delivery & engagement monitoring**: `BroadcastRecipient.messageId/deliveryStatus/deliveredAt/readAt/repliedAt` filled from WhatsApp receipts and incoming replies; delivered / read / replied / undelivered rates in Number Health (7d + 24h) and per broadcast in History/Detail. **Auto-pause**: a run stops and the number is paused for 12h (`BotConfig.broadcastPausedUntil/broadcastPauseReason`) when ≥70% of messages sent >10 min ago are still undelivered; alert sent; "Resume anyway" for owners. **Low-engagement alert** (cron every 30 min): 100+ sends in 24h with <1% replies.
 - **Auto-deploy workflow** (`.github/workflows/deploy.yml` + `scripts/deploy.sh`): on push to `main`, SSH into the VPS and run pull → install → `prisma db push` → build → PM2 reload. Enabled by setting the repository variable `DEPLOY_ENABLED=true` and the `VPS_*` secrets.
@@ -53,7 +54,7 @@
 - **Session detail page** polls status/metrics every 15s instead of every 3s (6 `COUNT(*)` queries on the Message table per 3s per open tab). Status changes still arrive instantly over the socket.
 
 ### Database
-- `BroadcastLog.error`, `mediaUrl`, `mediaType`, `options`; `BroadcastRecipient.vars`, `messageId`, `deliveryStatus`, `deliveredAt`, `readAt`, `repliedAt` (+ indexes); `BotConfig.warmupEnabled`, `warmupStartedAt`, `broadcastPausedUntil`, `broadcastPauseReason`; `SystemConfig.alertsEnabled`, `alertTelegramToken`, `alertTelegramChatId`, `alertEmail`, `alertOnLogout`, `alertOnBroadcast`, `alertOnLimit`; `BotConfig.dailyBroadcastLimit`, `quietHoursStart`, `quietHoursEnd`, `optOutEnabled`, `optOutKeywords`, `optOutReply`; `Contact.optedOut`, `optedOutAt` — run `npx prisma db push` (done automatically by `start.sh`).
+- `BroadcastLog.error`, `mediaUrl`, `mediaType`, `options`; `BroadcastRecipient.vars`, `messageId`, `deliveryStatus`, `deliveredAt`, `readAt`, `repliedAt` (+ indexes); `BotConfig.warmupEnabled`, `warmupStartedAt`, `broadcastPausedUntil`, `broadcastPauseReason`; `SystemConfig.enabledModules`, `alertsEnabled`, `alertTelegramToken`, `alertTelegramChatId`, `alertEmail`, `alertOnLogout`, `alertOnBroadcast`, `alertOnLimit`; `BotConfig.dailyBroadcastLimit`, `quietHoursStart`, `quietHoursEnd`, `optOutEnabled`, `optOutKeywords`, `optOutReply`; `Contact.optedOut`, `optedOutAt` — run `npx prisma db push` (done automatically by `start.sh`).
 
 ## [v1.6.4] - 2026-07-12
 
