@@ -1,3 +1,15 @@
+## [v1.7.0] - 2026-10-01
+
+### Added
+- **Campaign scheduler**: Broadcast → "Schedule for later" sends a broadcast at a set date/time, once or repeating daily / weekly / monthly, from the server (browser can be closed). Uses the same engine as Start (daily limit, warm-up, quiet hours, number check, opt-outs, multi-number rotation). If the number is offline at run time the campaign waits up to 30 minutes, then alerts. New **Campaigns** tab: pause / resume / run now / cancel / delete, last result and next run. `Campaign` table; API `GET/POST /api/campaigns`, `PATCH/DELETE /api/campaigns/:id`.
+- **Message templates** (`/dashboard/templates`, `MessageTemplate` table): saved message + media + buttons + footer + mode. Pick one on the Broadcast page (fills the form) or "Save as template" from the form. Owner-managed, staff can use them. API `/api/templates`.
+- **Contact lists** (`/dashboard/lists`, `ContactList` / `ContactListMember` tables): saved audiences built from pasted numbers or Excel (names and extra columns kept as placeholders), search, remove, CSV export. Pick a list on the Broadcast page or "Save these as a list" after an upload. Campaigns can reference a list, so members added later are included. Owner-managed, staff can use them. API `/api/contact-lists`, `/api/contact-lists/:id/members`.
+- Sidebar: **Templates** and **Contact Lists** under Messaging (part of the "Broadcast essentials" preset).
+
+### Fixed
+- **Contacts page full of "Unknown" rows with `…@lid` ids**: WhatsApp's LID privacy ids were stored as contacts. Contact sync and incoming messages now resolve a LID to the phone number (Baileys' LID mapping / `phoneNumber`), unresolvable LIDs are not stored as contacts, existing LID rows are merged into the phone-number contact after each connect (`mergeLidContacts`), and the Contacts API hides any remaining LID rows.
+- **Staff saw "Sessions / QR is not enabled" with a confusing message**: owner-only pages now explain that the account owner manages numbers and what to do when a number is disconnected; the dashboard no longer shows "Add Session" / "Create Session" links to staff.
+
 ## [v1.6.9] - 2026-10-01
 
 ### Fixed

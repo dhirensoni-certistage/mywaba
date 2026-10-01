@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { usePrismaAuthState } from "./auth/usePrismaAuthState";
 import { Server } from "socket.io";
 import pino from "pino";
-import { bindSessionStore } from "./store";
+import { bindSessionStore, mergeLidContacts } from "./store";
 import { syncGroups } from "./store/groups";
 import { bindContactSync } from "./store/contacts";
 import { bindAutoReply } from "./store/autoreply";
@@ -395,6 +395,8 @@ export class WhatsAppInstance {
                 });
 
                 logger.success("Instance", `Session ${this.sessionId} connected and synced successfully`);
+                // Repair contacts that were stored under a LID instead of a phone number (runs in the background).
+                if (this.socket) setTimeout(() => { mergeLidContacts(this.socket!, this.sessionId).catch(() => {}); }, 15_000).unref();
             }
         } catch (error: any) {
             if (error.code === 'P2025') {

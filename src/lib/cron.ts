@@ -6,6 +6,7 @@ import { logger } from "./logger";
 import { getEngagementStats, MONITOR } from "@/modules/whatsapp/safety";
 import { sendAlert } from "./alerts";
 import { runMediaCleanup } from "./media-cleanup";
+import { runDueCampaigns, recoverStaleCampaigns } from "@/modules/whatsapp/campaigns";
 
 /**
  * Scheduled-message runner.
@@ -143,8 +144,12 @@ export function initScheduler() {
         data: { status: "PENDING" }
     }).catch(() => {});
 
-    // Run every minute
-    cron.schedule("* * * * *", () => { runSchedulerTick(); });
+    // Run every minute: scheduled single messages, then scheduled broadcast campaigns
+    cron.schedule("* * * * *", () => {
+        runSchedulerTick();
+        runDueCampaigns().catch(e => logger.error("Campaign", "tick failed", e));
+    });
+    recoverStaleCampaigns().catch(() => {});
 
     // Engagement monitor: every 30 minutes, warn once a day per session when a lot was sent and almost nobody replied
     cron.schedule("*/30 * * * *", () => { runEngagementMonitor().catch(e => logger.error("Monitor", "engagement monitor failed", e)); });

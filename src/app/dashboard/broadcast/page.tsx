@@ -1,16 +1,17 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Progress } from "@/components/ui/progress";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { RefreshCw, Send, CheckCircle2, XCircle, Radio, Clock, AlertTriangle, History, Eye, Calendar, Ban, ShieldCheck, Info, Gauge, MoonStar, UserX, BookOpen, FileSpreadsheet, Upload, X, Plus, Smartphone, Timer, MousePointerClick, RotateCcw, ListChecks, Lightbulb } from "lucide-react";
+import { RefreshCw, Send, CheckCircle2, XCircle, Radio, Clock, AlertTriangle, History, Eye, Calendar, Ban, ShieldCheck, Info, Gauge, MoonStar, UserX, BookOpen, FileSpreadsheet, Upload, X, Plus, Smartphone, Timer, MousePointerClick, RotateCcw, ListChecks, Lightbulb, CalendarClock, Save, FileText, Pause, Play, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/components/dashboard/session-provider";
 import { useSession as useAuthSession } from "next-auth/react";
@@ -46,6 +47,17 @@ interface UploadedList {
     rows: { number: string; name: string | null; vars: Record<string, string> }[];
     invalid: string[];
     truncated: number;
+    /** Set when the rows came from a saved contact list (so a campaign can reference the list instead of a snapshot). */
+    listId?: string;
+    listCount?: number;
+}
+
+interface TemplateRow { id: string; name: string; body: string; mediaUrl: string | null; mediaType: string | null; buttons: ButtonDraft[] | null; footer: string | null; buttonMode: "interactive" | "text" | null }
+interface ListRow { id: string; name: string; members: number }
+interface CampaignRow {
+    id: string; name: string; status: string; sessionId: string; sessionName: string; scheduleAt: string; nextRunAt: string | null; lastRunAt: string | null;
+    runCount: number; repeat: string; listName: string | null; recipientCount: number | null; lastError: string | null;
+    lastResult: { total?: number; broadcasts?: { sessionId: string; broadcastId: string; total: number }[]; failures?: { sessionId: string; error: string }[] } | null;
 }
 
 type CheckStatus = "ok" | "not_on_whatsapp" | "invalid" | "opted_out";
@@ -164,9 +176,30 @@ export default function BroadcastPage() {
     const [loading, setLoading] = useState(false);
     const [cancelling, setCancelling] = useState(false);
     const [progressMap, setProgressMap] = useState<Record<string, BroadcastProgress>>({});
-    const [activeTab, setActiveTab] = useState<"new" | "history" | "guide">("new");
+    const [activeTab, setActiveTab] = useState<"new" | "history" | "guide" | "campaigns">("new");
     const [shuffle, setShuffle] = useState(true);
     const [health, setHealth] = useState<BroadcastHealth | null>(null);
+
+    // Templates, contact lists, scheduling
+    const searchParams = useSearchParams();
+    const router = useRouter();
+    const canManage = (authSession?.user as any)?.role !== "STAFF";
+    const [templates, setTemplates] = useState<TemplateRow[]>([]);
+    const [lists, setLists] = useState<ListRow[]>([]);
+    const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+    const [selectedListId, setSelectedListId] = useState<string>("");
+    const [listLoading, setListLoading] = useState(false);
+    const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+    const [saveListOpen, setSaveListOpen] = useState(false);
+    const [saveName, setSaveName] = useState("");
+    const [savingNamed, setSavingNamed] = useState(false);
+    const [scheduleMode, setScheduleMode] = useState(false);
+    const [campaignName, setCampaignName] = useState("");
+    const [scheduleAt, setScheduleAt] = useState("");
+    const [repeat, setRepeat] = useState<"none" | "daily" | "weekly" | "monthly">("none");
+    const [scheduling, setScheduling] = useState(false);
+    const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
+    const [campaignsLoading, setCampaignsLoading] = useState(false);
 
     // History
     const [history, setHistory] = useState<BroadcastLog[]>([]);
@@ -210,6 +243,159 @@ export default function BroadcastPage() {
     }, [sessionId, getSocket, joinSession]);
 
     // Fetch history
+    /** The recipients exactly as Start would send them (uploaded rows with variables, or pasted numbers). */
+    const currentRecipients = (): (string | { number: string; name: string | null; vars: Record<string, string> })[] =>
+        uploaded ? uploaded.rows.map(r => ({ number: r.number, name: r.name, vars: r.vars })) : contacts.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+
+    const loadTemplatesAndLists = useCallback(async () => {
+        if (!sessionId) return;
+        try {
+            const [t, l] = await Promise.all([
+                fetch(`/api/templates?sessionId=${encodeURIComponent(sessionId)}`).then(r => r.json()).catch(() => null),
+                fetch(`/api/contact-lists?sessionId=${encodeURIComponent(sessionId)}`).then(r => r.json()).catch(() => null)
+            ]);
+            setTemplates(t?.data || []);
+            setLists(l?.data || []);
+        } catch { /* optional */ }
+    }, [sessionId]);
+    useEffect(() => { loadTemplatesAndLists(); }, [loadTemplatesAndLists]);
+
+    const applyTemplate = (t: TemplateRow | undefined) => {
+        if (!t) return;
+        setSelectedTemplateId(t.id);
+        setMessage(t.body || "");
+        setMediaUrl(t.mediaUrl || "");
+        if (t.mediaType) setMediaType(t.mediaType);
+        setButtons((t.buttons || []).map(b => ({ type: b.type, text: b.text, url: b.url || "", phone: b.phone || "" })));
+        setFooter(t.footer || "");
+        setButtonMode(t.buttonMode === "text" ? "text" : "interactive");
+        toast.success(`Template "${t.name}" applied`);
+    };
+
+    const applyList = async (id: string) => {
+        if (!id) { setSelectedListId(""); return; }
+        setListLoading(true);
+        try {
+            const res = await fetch(`/api/contact-lists/${id}?limit=5000`);
+            const json = await res.json();
+            if (!res.ok || !json.status) throw new Error(json.message || "Could not load the list");
+            const d = json.data;
+            const rows = (d.members || []).map((m: { number: string; name: string | null; vars: Record<string, string> | null }) => ({ number: m.number, name: m.name, vars: { ...(m.vars || {}), ...(m.name ? { name: m.name } : {}) } }));
+            const extraCols = Array.from(new Set(rows.flatMap((r: { vars: Record<string, string> }) => Object.keys(r.vars)))) as string[];
+            setSelectedListId(id);
+            setUploaded({ fileName: `List: ${d.name}`, columns: ["phone", ...extraCols], numberColumn: "phone", nameColumn: extraCols.includes("name") ? "name" : null, rows, invalid: [], truncated: 0, listId: id, listCount: d.allMembers ?? rows.length });
+            setContacts("");
+            setCheck(null);
+            toast.success(`${rows.length} contact(s) loaded from "${d.name}"${d.allMembers > rows.length ? ` (first ${rows.length} of ${d.allMembers})` : ""}`);
+        } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : "Could not load the list");
+        } finally {
+            setListLoading(false);
+        }
+    };
+
+    // Deep links from the Templates / Contact Lists pages: /dashboard/broadcast?template=ID or ?list=ID
+    useEffect(() => {
+        const t = searchParams.get("template");
+        const l = searchParams.get("list");
+        if (!t && !l) return;
+        if (t && templates.length > 0) { applyTemplate(templates.find(x => x.id === t)); router.replace("/dashboard/broadcast"); }
+        if (l && lists.length > 0) { applyList(l); router.replace("/dashboard/broadcast"); }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams, templates, lists]);
+
+    const saveAsTemplate = async () => {
+        if (!saveName.trim()) return toast.error("Give the template a name");
+        setSavingNamed(true);
+        try {
+            const cleanButtons = buttons.map(b => ({ type: b.type, text: b.text.trim(), url: b.url.trim() || undefined, phone: b.phone.trim() || undefined })).filter(b => b.text && (b.type !== "url" || b.url) && (b.type !== "call" || b.phone));
+            const res = await fetch("/api/templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: saveName.trim(), body: message, mediaUrl: mediaUrl.trim() || null, mediaType: mediaUrl.trim() ? mediaType : null, buttons: cleanButtons, footer: footer.trim() || null, buttonMode }) });
+            const json = await res.json();
+            if (!res.ok || !json.status) throw new Error(json.message || "Save failed");
+            toast.success(json.message);
+            setSaveTemplateOpen(false); setSaveName("");
+            loadTemplatesAndLists();
+        } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Save failed"); }
+        finally { setSavingNamed(false); }
+    };
+
+    const saveAsList = async () => {
+        if (!saveName.trim()) return toast.error("Give the list a name");
+        const recipients = currentRecipients();
+        if (recipients.length === 0) return toast.error("No recipients to save");
+        setSavingNamed(true);
+        try {
+            const res = await fetch("/api/contact-lists", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: saveName.trim(), recipients }) });
+            const json = await res.json();
+            if (!res.ok || !json.status) throw new Error(json.message || "Save failed");
+            toast.success(json.message);
+            setSaveListOpen(false); setSaveName("");
+            loadTemplatesAndLists();
+        } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Save failed"); }
+        finally { setSavingNamed(false); }
+    };
+
+    const fetchCampaigns = useCallback(async () => {
+        if (!sessionId) return;
+        setCampaignsLoading(true);
+        try {
+            const res = await fetch("/api/campaigns");
+            const json = await res.json();
+            setCampaigns(json?.data || []);
+        } catch { /* ignore */ }
+        finally { setCampaignsLoading(false); }
+    }, [sessionId]);
+    useEffect(() => { if (activeTab === "campaigns") fetchCampaigns(); }, [activeTab, fetchCampaigns]);
+
+    const campaignAction = async (c: CampaignRow, action: "pause" | "resume" | "cancel" | "run_now" | "delete") => {
+        if (action === "cancel" && !confirm(`Cancel campaign "${c.name}"?`)) return;
+        if (action === "delete" && !confirm(`Delete campaign "${c.name}"?`)) return;
+        const res = await fetch(`/api/campaigns/${c.id}`, action === "delete" ? { method: "DELETE" } : { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+        const json = await res.json();
+        if (res.ok && json.status) toast.success(json.message); else toast.error(json.message || "Action failed");
+        fetchCampaigns();
+    };
+
+    const handleSchedule = async () => {
+        if (!sessionId) return toast.error("No active session found");
+        if (!campaignName.trim()) return toast.error("Give the campaign a name");
+        if (!scheduleAt) return toast.error("Pick a date and time");
+        const when = new Date(scheduleAt);
+        if (Number.isNaN(when.getTime()) || when.getTime() < Date.now() - 60_000) return toast.error("Pick a time in the future");
+        if (!message.trim() && !mediaUrl.trim()) return toast.error("Message or media cannot be empty");
+        const recipients = currentRecipients();
+        const useList = Boolean(uploaded?.listId && selectedListId && uploaded.listId === selectedListId && uploaded.rows.length === (uploaded.listCount ?? -1));
+        if (!useList && recipients.length === 0) return toast.error("No recipients specified");
+        const cleanButtons = buttons.map(b => ({ type: b.type, text: b.text.trim(), url: b.url.trim() || undefined, phone: b.phone.trim() || undefined })).filter(b => b.text && (b.type !== "url" || b.url) && (b.type !== "call" || b.phone));
+        setScheduling(true);
+        try {
+            const res = await fetch("/api/campaigns", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sessionId, name: campaignName.trim(), scheduleAt: when.toISOString(), repeat,
+                    listId: useList ? selectedListId : undefined,
+                    recipients: useList ? undefined : recipients,
+                    payload: {
+                        message, mediaUrl: mediaUrl.trim() || undefined, mediaType: mediaUrl.trim() ? (mediaType || "image") : undefined,
+                        delay: delay[0], batchSize, batchPauseMs: batchPauseSec * 1000, simulateTyping, validateNumbers, shuffle,
+                        spreadHours: spreadHours > 0 ? spreadHours : undefined, sessionIds: extraSessions.length > 0 ? extraSessions : undefined,
+                        buttons: cleanButtons.length > 0 ? cleanButtons : undefined, footer: cleanButtons.length > 0 && footer.trim() ? footer.trim() : undefined,
+                        buttonMode: cleanButtons.length > 0 ? buttonMode : undefined
+                    }
+                })
+            });
+            const json = await res.json();
+            if (!res.ok || !json.status) throw new Error(json.message || "Could not schedule");
+            toast.success(json.message, { duration: 8000 });
+            setScheduleMode(false); setCampaignName(""); setScheduleAt(""); setRepeat("none");
+            setActiveTab("campaigns");
+        } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : "Could not schedule");
+        } finally {
+            setScheduling(false);
+        }
+    };
+
     const fetchHistory = useCallback(async () => {
         if (!sessionId) return;
         setHistoryLoading(true);
@@ -462,9 +648,7 @@ export default function BroadcastPage() {
         setProgressMap({});
 
         try {
-            const recipients: (string | { number: string; name: string | null; vars: Record<string, string> })[] = uploaded
-                ? uploaded.rows.map(r => ({ number: r.number, name: r.name, vars: r.vars }))
-                : contacts.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+            const recipients = currentRecipients();
 
             if (recipients.length === 0) {
                 toast.error("No recipients specified");
@@ -601,6 +785,7 @@ export default function BroadcastPage() {
     const tabs = [
         { id: "new" as const, label: "New Broadcast", icon: Send },
         { id: "history" as const, label: "History", icon: History },
+        { id: "campaigns" as const, label: "Campaigns", icon: CalendarClock },
         { id: "guide" as const, label: "Safety Guide", icon: BookOpen },
     ];
 
@@ -643,6 +828,27 @@ export default function BroadcastPage() {
                                     <CardDescription>Paste numbers, or upload an Excel / CSV with a number column and any extra columns (name, city, order…) to personalise each message.</CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
+                                    {/* Saved contact list */}
+                                    <div className="space-y-2 rounded-lg border p-3 bg-muted/20">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <Label className="flex items-center gap-1.5"><ListChecks className="h-4 w-4" /> Use a saved contact list</Label>
+                                            {canManage && recipientCount > 0 && !uploaded?.listId && (
+                                                <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => { setSaveName(uploaded?.fileName?.replace(/\.[^.]+$/, "") || ""); setSaveListOpen(true); }} disabled={loading}><Save className="h-3.5 w-3.5 mr-1" /> Save these {recipientCount} as a list</Button>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <Select value={selectedListId || "__none"} onValueChange={(v: string) => { if (v === "__none") { setSelectedListId(""); if (uploaded?.listId) setUploaded(null); } else applyList(v); }} disabled={loading || listLoading}>
+                                                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Pick a list…" /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="__none">— none (paste or upload below) —</SelectItem>
+                                                    {lists.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.members})</SelectItem>)}
+                                                </SelectContent>
+                                            </Select>
+                                            {listLoading && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground self-center" />}
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground">Lists are managed under <strong>Contact Lists</strong>. {lists.length === 0 ? "You have none yet — upload or paste numbers below and press “Save these as a list”." : ""}</p>
+                                    </div>
+
                                     {/* File upload */}
                                     <div className="space-y-2">
                                         <div className="flex items-center justify-between">
@@ -752,6 +958,23 @@ export default function BroadcastPage() {
                                     <CardTitle>Message Content</CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
+                                    <div className="space-y-2 rounded-lg border p-3 bg-muted/20">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <Label className="flex items-center gap-1.5"><FileText className="h-4 w-4" /> Template</Label>
+                                            {canManage && (message.trim() || mediaUrl.trim()) && (
+                                                <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => { setSaveName(""); setSaveTemplateOpen(true); }} disabled={loading}><Save className="h-3.5 w-3.5 mr-1" /> Save as template</Button>
+                                            )}
+                                        </div>
+                                        <Select value={selectedTemplateId || "__none"} onValueChange={(v: string) => { if (v === "__none") setSelectedTemplateId(""); else applyTemplate(templates.find(t => t.id === v)); }} disabled={loading}>
+                                            <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Pick a template…" /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="__none">— none —</SelectItem>
+                                                {templates.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                        <p className="text-[11px] text-muted-foreground">Picking a template fills in the message, media and buttons; you can still edit them below. Manage them under <strong>Templates</strong>.</p>
+                                    </div>
+
                                     <div className="space-y-2">
                                         <Label>Message (Optional if media attached)</Label>
                                         <p className="text-[11px] text-muted-foreground">
@@ -929,14 +1152,55 @@ export default function BroadcastPage() {
                                             </p>
                                         )}
 
-                                        <Button
-                                            className="w-full"
-                                            onClick={() => handleSend()}
-                                            disabled={loading || !sessionId || recipientCount === 0 || (!message.trim() && !mediaUrl.trim())}
-                                        >
-                                            {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                            {loading ? "Broadcasting..." : "Start Broadcast"}
-                                        </Button>
+                                        {/* Schedule for later */}
+                                        <div className="space-y-3 rounded-lg border p-3">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <Label htmlFor="schedule-mode" className="flex items-center gap-1.5 cursor-pointer"><CalendarClock className="h-4 w-4" /> Schedule for later</Label>
+                                                <Switch id="schedule-mode" checked={scheduleMode} onCheckedChange={setScheduleMode} disabled={loading} />
+                                            </div>
+                                            {scheduleMode && (
+                                                <div className="space-y-2">
+                                                    <Input placeholder="Campaign name (e.g. Diwali offer – batch 1)" value={campaignName} onChange={e => setCampaignName(e.target.value)} maxLength={120} />
+                                                    <div className="grid sm:grid-cols-2 gap-2">
+                                                        <Input type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)} min={new Date(Date.now() + 2 * 60_000).toISOString().slice(0, 16)} />
+                                                        <Select value={repeat} onValueChange={(v: string) => setRepeat(v as typeof repeat)}>
+                                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="none">Send once</SelectItem>
+                                                                <SelectItem value="daily">Repeat daily at this time</SelectItem>
+                                                                <SelectItem value="weekly">Repeat weekly (same weekday)</SelectItem>
+                                                                <SelectItem value="monthly">Repeat monthly (same date)</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    <p className="text-[11px] text-muted-foreground">
+                                                        Runs on the server — the browser can be closed. All safety rules apply at run time (daily limit, warm-up, quiet hours, number check, opt-outs).
+                                                        {uploaded?.listId ? " The campaign references the contact list, so members added later are included." : " The current recipients are saved with the campaign."}
+                                                        {" "}If the number is offline at that time it waits up to 30 minutes, then you get an alert.
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {scheduleMode ? (
+                                            <Button
+                                                className="w-full"
+                                                onClick={handleSchedule}
+                                                disabled={scheduling || loading || !sessionId || recipientCount === 0 || (!message.trim() && !mediaUrl.trim()) || !scheduleAt || !campaignName.trim()}
+                                            >
+                                                {scheduling ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <CalendarClock className="mr-2 h-4 w-4" />}
+                                                {scheduling ? "Scheduling..." : repeat === "none" ? "Schedule campaign" : "Schedule recurring campaign"}
+                                            </Button>
+                                        ) : (
+                                            <Button
+                                                className="w-full"
+                                                onClick={() => handleSend()}
+                                                disabled={loading || !sessionId || recipientCount === 0 || (!message.trim() && !mediaUrl.trim())}
+                                            >
+                                                {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                                {loading ? "Broadcasting..." : "Start Broadcast"}
+                                            </Button>
+                                        )}
                                     </div>
                                 </CardContent>
                             </Card>
@@ -1175,6 +1439,77 @@ export default function BroadcastPage() {
                             </Card>
                         ))}
                     </>
+                )}
+
+                {/* Save-as dialogs */}
+                <Dialog open={saveTemplateOpen} onOpenChange={setSaveTemplateOpen}>
+                    <DialogContent>
+                        <DialogHeader><DialogTitle>Save as template</DialogTitle><DialogDescription>The current message, media, buttons and footer are saved for reuse.</DialogDescription></DialogHeader>
+                        <Input placeholder="Template name" value={saveName} onChange={e => setSaveName(e.target.value)} maxLength={80} autoFocus />
+                        <DialogFooter><Button variant="outline" onClick={() => setSaveTemplateOpen(false)}>Cancel</Button><Button onClick={saveAsTemplate} disabled={savingNamed}>{savingNamed ? <RefreshCw className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />} Save</Button></DialogFooter>
+                    </DialogContent>
+                </Dialog>
+                <Dialog open={saveListOpen} onOpenChange={setSaveListOpen}>
+                    <DialogContent>
+                        <DialogHeader><DialogTitle>Save recipients as a contact list</DialogTitle><DialogDescription>{recipientCount} recipient(s) with their names and extra columns are saved. Duplicates are merged.</DialogDescription></DialogHeader>
+                        <Input placeholder="List name" value={saveName} onChange={e => setSaveName(e.target.value)} maxLength={80} autoFocus />
+                        <DialogFooter><Button variant="outline" onClick={() => setSaveListOpen(false)}>Cancel</Button><Button onClick={saveAsList} disabled={savingNamed}>{savingNamed ? <RefreshCw className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />} Save list</Button></DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {activeTab === "campaigns" && (
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between gap-2">
+                                <div>
+                                    <CardTitle>Scheduled campaigns</CardTitle>
+                                    <CardDescription>Broadcasts that start by themselves at the set time, on all your numbers. Create one from New Broadcast → “Schedule for later”.</CardDescription>
+                                </div>
+                                <Button variant="outline" size="sm" onClick={fetchCampaigns} disabled={campaignsLoading}><RefreshCw className={`h-3.5 w-3.5 mr-1 ${campaignsLoading ? "animate-spin" : ""}`} /> Refresh</Button>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            {campaignsLoading && campaigns.length === 0 ? (
+                                <div className="flex items-center justify-center py-8"><RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+                            ) : campaigns.length === 0 ? (
+                                <div className="text-center py-8 text-muted-foreground"><CalendarClock className="h-8 w-8 mx-auto mb-2 opacity-50" /><p className="text-sm">No campaigns yet.</p></div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {campaigns.map(c => {
+                                        const tone = c.status === "SCHEDULED" ? "bg-blue-500/10 text-blue-700" : c.status === "RUNNING" ? "bg-green-500/10 text-green-700" : c.status === "PAUSED" ? "bg-yellow-500/10 text-yellow-700" : c.status === "DONE" ? "bg-muted text-muted-foreground" : c.status === "FAILED" ? "bg-red-500/10 text-red-700" : "bg-muted text-muted-foreground";
+                                        return (
+                                            <div key={c.id} className="flex flex-col md:flex-row md:items-center gap-3 p-3 rounded-lg border hover:bg-muted/30 transition-colors">
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <p className="text-sm font-medium truncate">{c.name}</p>
+                                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${tone}`}>{c.status}</span>
+                                                        <span className="text-[11px] text-muted-foreground">{c.repeat}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1 flex-wrap">
+                                                        <span className="flex items-center gap-1"><Smartphone className="h-3 w-3" /> {c.sessionName}</span>
+                                                        <span className="flex items-center gap-1"><ListChecks className="h-3 w-3" /> {c.listName ? `${c.listName} (${c.recipientCount ?? "?"})` : `${c.recipientCount ?? 0} recipients`}</span>
+                                                        {c.nextRunAt && (c.status === "SCHEDULED" || c.status === "PAUSED") && <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> next {new Date(c.nextRunAt).toLocaleString()}</span>}
+                                                        {c.lastRunAt && <span>last run {new Date(c.lastRunAt).toLocaleString()} ({c.runCount}×)</span>}
+                                                    </div>
+                                                    {c.lastError && <p className="text-xs text-red-500 mt-1 truncate" title={c.lastError}>{c.lastError}</p>}
+                                                    {c.lastResult?.broadcasts && c.lastResult.broadcasts.length > 0 && !c.lastError && (
+                                                        <p className="text-xs text-green-700 mt-1">Started {c.lastResult.total ?? 0} message(s) on {c.lastResult.broadcasts.length} number(s) — see History for progress.</p>
+                                                    )}
+                                                </div>
+                                                <div className="flex gap-1 shrink-0 flex-wrap">
+                                                    {c.status === "SCHEDULED" && <Button variant="outline" size="sm" onClick={() => campaignAction(c, "pause")} title="Pause"><Pause className="h-3.5 w-3.5" /></Button>}
+                                                    {c.status === "PAUSED" && <Button variant="outline" size="sm" onClick={() => campaignAction(c, "resume")} title="Resume"><Play className="h-3.5 w-3.5" /></Button>}
+                                                    {["SCHEDULED", "PAUSED", "FAILED", "DONE"].includes(c.status) && <Button variant="outline" size="sm" onClick={() => campaignAction(c, "run_now")} title="Run now"><Zap className="h-3.5 w-3.5" /></Button>}
+                                                    {["SCHEDULED", "PAUSED", "FAILED"].includes(c.status) && <Button variant="outline" size="sm" onClick={() => campaignAction(c, "cancel")} title="Cancel"><Ban className="h-3.5 w-3.5" /></Button>}
+                                                    {c.status !== "RUNNING" && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => campaignAction(c, "delete")} title="Delete"><Trash2 className="h-3.5 w-3.5" /></Button>}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
                 )}
 
                 {activeTab === "history" && (

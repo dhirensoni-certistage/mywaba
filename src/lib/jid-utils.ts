@@ -172,3 +172,17 @@ export async function batchResolveToPhoneJid(
 
     return result;
 }
+
+/**
+ * Ask Baileys' LID mapping store for the phone JID behind a @lid id. Returns a normalised
+ * @s.whatsapp.net JID, or null when the mapping is unknown (or the socket has no repository).
+ */
+export async function lidToPhoneJidViaSocket(sock: unknown, lid: string): Promise<string | null> {
+    if (!isLidJid(lid)) return normalizeJid(lid);
+    try {
+        const repo = (sock as { signalRepository?: { lidMapping?: { getPNForLID?: (l: string) => Promise<string | null> } } })?.signalRepository;
+        const pn = await repo?.lidMapping?.getPNForLID?.(lid);
+        if (pn && !isLidJid(pn)) return normalizeJid(pn);
+    } catch { /* mapping store unavailable */ }
+    return null;
+}

@@ -1,7 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
+import { launchBroadcasts } from "@/modules/whatsapp/campaigns";
 import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
-import { startBroadcast, getBroadcastHealth, BROADCAST_LIMITS, type RecipientInput } from "@/modules/whatsapp/broadcast";
-import { waManager } from "@/modules/whatsapp/manager";
+import { getBroadcastHealth, BROADCAST_LIMITS, type RecipientInput } from "@/modules/whatsapp/broadcast";
 import { z } from "zod";
 
 const recipientSchema = z.union([
@@ -106,38 +106,13 @@ export async function POST(
 
         const { recipients, message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, sessionIds, buttons, footer, buttonMode } = parseResult.data;
 
-        // ---- Multi-number rotation: split the list across every connected session the user may use ----
-        const targetSessions: string[] = [sessionId];
-        const rejectedSessions: { sessionId: string; reason: string }[] = [];
-        for (const extra of Array.from(new Set(sessionIds || []))) {
-            if (extra === sessionId) continue;
-            const ok = await canAccessSession(user.id, user.role, extra);
-            if (!ok) { rejectedSessions.push({ sessionId: extra, reason: "no access" }); continue; }
-            const inst = waManager.getInstance(extra);
-            if (!inst?.socket || inst.status !== "CONNECTED") { rejectedSessions.push({ sessionId: extra, reason: "not connected" }); continue; }
-            targetSessions.push(extra);
-        }
-
-        const buckets: RecipientInput[][] = targetSessions.map(() => []);
-        (recipients as RecipientInput[]).forEach((r, i) => { buckets[i % targetSessions.length].push(r); });
-
-        const common = { message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, buttons, footer, buttonMode };
-        const started: { sessionId: string; broadcastId: string; total: number; delayMs: number }[] = [];
-        const invalid: string[] = [];
-        const failures: { sessionId: string; error: string }[] = [];
-
-        for (let i = 0; i < targetSessions.length; i++) {
-            if (buckets[i].length === 0) continue;
-            try {
-                const result = await startBroadcast({ sessionId: targetSessions[i], recipients: buckets[i], ...common });
-                started.push({ sessionId: targetSessions[i], broadcastId: result.broadcastId, total: result.total, delayMs: result.delayMs });
-                invalid.push(...result.invalid);
-            } catch (e: any) {
-                // The primary session failing is a hard error; an extra session failing just means its share is not sent.
-                if (i === 0) throw e;
-                failures.push({ sessionId: targetSessions[i], error: e?.message || "Failed to start" });
-            }
-        }
+        // Multi-number rotation + per-number runs live in launchBroadcasts (shared with scheduled campaigns).
+        const launched = await launchBroadcasts({
+            userId: user.id, userRole: user.role, sessionId,
+            recipients: recipients as RecipientInput[],
+            payload: { message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, buttons, footer, buttonMode, sessionIds }
+        });
+        const { started, invalid, rejectedSessions, failures } = launched;
 
         return NextResponse.json({
             status: true,
@@ -146,7 +121,7 @@ export async function POST(
                 // legacy single-broadcast fields (first/primary run)
                 broadcastId: started[0]?.broadcastId,
                 total: started.reduce((n, b) => n + b.total, 0),
-                invalidRecipients: Array.from(new Set(invalid)),
+                invalidRecipients: invalid,
                 broadcasts: started,
                 rejectedSessions,
                 failures
