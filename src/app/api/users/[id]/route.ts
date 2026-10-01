@@ -25,11 +25,23 @@ export async function PATCH(
             // Allow update but maybe warn? For now let it be.
         }
 
+        if (role && !["SUPERADMIN", "OWNER", "STAFF"].includes(role)) {
+            return NextResponse.json({ status: false, message: "Invalid role", error: "Invalid role" }, { status: 400 });
+        }
+        if (id === user.id && role && role !== "SUPERADMIN") {
+            return NextResponse.json({ status: false, message: "You cannot remove your own Super Admin role", error: "You cannot remove your own Super Admin role" }, { status: 400 });
+        }
+        if (email) {
+            const clash = await prisma.user.findFirst({ where: { email, NOT: { id } }, select: { id: true } });
+            if (clash) return NextResponse.json({ status: false, message: "Another user already has that email", error: "Another user already has that email" }, { status: 409 });
+        }
+
         const updateData: any = {};
         if (name) updateData.name = name;
         if (email) updateData.email = email;
         if (role) updateData.role = role;
         if (password) {
+            if (String(password).length < 6) return NextResponse.json({ status: false, message: "Password must be at least 6 characters", error: "Password must be at least 6 characters" }, { status: 400 });
             updateData.password = await bcrypt.hash(password, 10);
         }
 
@@ -45,11 +57,12 @@ export async function PATCH(
             }
         });
 
-        return NextResponse.json({ status: true, message: "User updated successfully", data: updatedUser });
+        return NextResponse.json({ status: true, message: role ? "User updated. The new role applies within a minute, or immediately after they log in again." : "User updated successfully", data: updatedUser });
 
     } catch (error) {
         console.error("Update user error:", error);
-        return NextResponse.json({ status: false, message: "Failed to update user", error: "Failed to update user" }, { status: 500 });
+        const msg = (error as { code?: string })?.code === "P2025" ? "User not found" : "Failed to update user";
+        return NextResponse.json({ status: false, message: msg, error: msg }, { status: 500 });
     }
 }
 
