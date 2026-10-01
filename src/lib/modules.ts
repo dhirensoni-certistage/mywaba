@@ -18,7 +18,9 @@ export const MODULES: ModuleDef[] = [
     { href: "/dashboard", label: "Dashboard", group: "Main", description: "Overview & session status" },
     { href: "/dashboard/sessions", label: "Sessions / QR", group: "Main", ownerOnly: true, description: "Connect WhatsApp numbers" },
     { href: "/dashboard/chat", label: "Chat", group: "Messaging", description: "Conversations & campaign replies" },
-    { href: "/dashboard/broadcast", label: "Broadcast", group: "Messaging", description: "Bulk campaigns, number health, safety guide" },
+    { href: "/dashboard/broadcast", label: "Broadcast", group: "Messaging", description: "Bulk campaigns, scheduling, number health, safety guide" },
+    { href: "/dashboard/templates", label: "Templates", group: "Messaging", description: "Saved messages for broadcasts" },
+    { href: "/dashboard/lists", label: "Contact Lists", group: "Messaging", description: "Saved audiences for broadcasts and campaigns" },
     { href: "/dashboard/sticker", label: "Sticker Maker", group: "Messaging" },
     { href: "/dashboard/contacts", label: "Contacts", group: "Contacts", description: "Audience, names, opt-outs" },
     { href: "/dashboard/groups", label: "Groups", group: "Contacts" },
@@ -45,7 +47,7 @@ export const MODULE_PRESETS: Record<string, { label: string; description: string
     essentials: {
         label: "Broadcast essentials",
         description: "What a marketing client needs: connect number, chat, broadcast, contacts, scheduler, safety settings.",
-        hrefs: ["/dashboard", "/dashboard/sessions", "/dashboard/chat", "/dashboard/broadcast", "/dashboard/contacts", "/dashboard/scheduler", "/dashboard/bot-settings", "/dashboard/settings"],
+        hrefs: ["/dashboard", "/dashboard/sessions", "/dashboard/chat", "/dashboard/broadcast", "/dashboard/templates", "/dashboard/lists", "/dashboard/contacts", "/dashboard/scheduler", "/dashboard/bot-settings", "/dashboard/settings"],
     },
     support: {
         label: "Support desk",

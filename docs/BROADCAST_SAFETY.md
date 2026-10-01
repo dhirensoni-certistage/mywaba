@@ -47,6 +47,24 @@ number. The approaches that scale safely are:
 Do not: shorten the minimum delay (it is 3 s on purpose), run the same list from the same number twice
 a day, or use freshly bought SIMs for volume — they are flagged within hours.
 
+## Templates, contact lists and scheduled campaigns
+
+- **Templates** (sidebar → Templates): a saved message with its media, buttons, footer and button mode.
+  Pick one on the Broadcast page to fill the form, or press *Save as template* after writing a message.
+  Owners manage them; staff can use them on shared numbers.
+- **Contact lists** (sidebar → Contact Lists): a saved audience. Build it from pasted numbers
+  (`919876543210, Name` per line) or an Excel/CSV upload (names and extra columns are kept as
+  `{placeholders}`); search, remove, export CSV. On the Broadcast page pick a list instead of uploading,
+  or press *Save these as a list* after an upload. Opted-out contacts are still skipped at send time.
+- **Campaigns** (Broadcast → *Schedule for later*): the broadcast starts by itself at the chosen time,
+  once or repeating daily / weekly / monthly (system timezone). It runs on the server, so the browser can
+  be closed, and it goes through exactly the same engine as *Start*: daily limit, warm-up, quiet hours,
+  number check, opt-outs and multi-number rotation all apply at run time. A campaign that uses a contact
+  list reads the list when it runs (members added later are included); one built from pasted/uploaded
+  numbers keeps that snapshot. If the number is offline at the scheduled time the campaign waits up to
+  30 minutes, then fails with an alert (recurring campaigns simply try again at the next occurrence).
+  The **Campaigns** tab shows next run, last result and offers pause / resume / run now / cancel.
+
 ## Excel / CSV upload
 
 Upload a `.xlsx` or `.csv` on the Broadcast page. The first row must be a header. Required: a column

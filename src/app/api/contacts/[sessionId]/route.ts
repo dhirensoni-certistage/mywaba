@@ -40,6 +40,8 @@ export async function GET(
 
         const where: any = {
             sessionId: sessionData.id,
+            // LID-keyed rows (privacy ids, no phone number) are legacy data; new ones are no longer created.
+            NOT: { jid: { endsWith: "@lid" } },
         };
 
         if (search) {

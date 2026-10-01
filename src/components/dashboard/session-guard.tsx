@@ -1,6 +1,7 @@
 "use client";
 
 import { useSession } from "./session-provider";
+import { useSession as useAuthSession } from "next-auth/react";
 import { Bot, QrCode } from "lucide-react";
 import { ReactNode } from "react";
 import Link from "next/link";
@@ -8,6 +9,8 @@ import { Button } from "@/components/ui/button";
 
 export function SessionGuard({ children }: { children: ReactNode }) {
     const { sessionId, loading, sessions } = useSession();
+    const { data: authSession } = useAuthSession();
+    const isStaff = (authSession?.user as { role?: string } | undefined)?.role === "STAFF";
 
     if (loading) {
         return <div className="flex h-full items-center justify-center p-8">Loading session...</div>;
@@ -27,12 +30,16 @@ export function SessionGuard({ children }: { children: ReactNode }) {
                 </div>
 
                 {sessions.length === 0 && (
-                    <div className="flex flex-col gap-2">
-                        <p className="text-sm text-gray-500">You don't have any sessions yet.</p>
-                        <Link href="/dashboard/sessions">
-                            <Button variant="outline">Create a Session</Button>
-                        </Link>
-                    </div>
+                    isStaff ? (
+                        <p className="text-sm text-gray-500 max-w-md">No WhatsApp number has been shared with your account yet. Ask the account owner to grant you access (Session Access).</p>
+                    ) : (
+                        <div className="flex flex-col gap-2">
+                            <p className="text-sm text-gray-500">You don&apos;t have any sessions yet.</p>
+                            <Link href="/dashboard/sessions">
+                                <Button variant="outline">Create a Session</Button>
+                            </Link>
+                        </div>
+                    )
                 )}
             </div>
         );

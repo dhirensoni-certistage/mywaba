@@ -6,7 +6,7 @@ import { isModuleEnabled } from "@/lib/modules";
 import { useState } from "react";
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Menu, ChevronDown } from "lucide-react";
+import { Menu, ChevronDown, ListChecks } from "lucide-react";
 import Link from "next/link";
 import {
     LayoutDashboard,
@@ -54,6 +54,8 @@ const navGroups: NavGroup[] = [
         items: [
             { href: "/dashboard/chat", label: "Chat", icon: MessageSquare },
             { href: "/dashboard/broadcast", label: "Broadcast", icon: Megaphone },
+            { href: "/dashboard/templates", label: "Templates", icon: FileText },
+            { href: "/dashboard/lists", label: "Contact Lists", icon: ListChecks },
             { href: "/dashboard/sticker", label: "Sticker Maker", icon: ImageIcon },
         ],
     },

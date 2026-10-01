@@ -85,8 +85,9 @@ export default async function DashboardPage() {
         },
     ];
 
+    const isStaff = user.role === "STAFF";
     const quickActions = [
-        { href: "/dashboard/sessions", label: "New Session", icon: Plus, description: "Connect a new device" },
+        ...(isStaff ? [] : [{ href: "/dashboard/sessions", label: "New Session", icon: Plus, description: "Connect a new device" }]),
         { href: "/dashboard/chat", label: "Send Message", icon: Send, description: "Open chat interface" },
         { href: "/dashboard/bot-settings", label: "Bot Settings", icon: Bot, description: "Configure chatbot" },
         { href: "/dashboard/system-monitor", label: "System Monitor", icon: Activity, description: "View server metrics" },
@@ -100,11 +101,11 @@ export default async function DashboardPage() {
                     <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Dashboard</h2>
                     <p className="text-sm text-slate-500 mt-1">Overview of your WhatsApp gateway</p>
                 </div>
-                <Link href="/dashboard/sessions">
+                {!isStaff && <Link href="/dashboard/sessions">
                     <Button size="sm" className="gap-2">
                         <Plus className="h-4 w-4" /> Add Session
                     </Button>
-                </Link>
+                </Link>}
             </div>
 
             {/* Stats Grid */}
@@ -159,9 +160,9 @@ export default async function DashboardPage() {
             <div>
                 <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Sessions</h3>
-                    <Link href="/dashboard/sessions" className="text-xs text-primary hover:text-primary/80 font-medium flex items-center gap-1 transition-colors">
+                    {!isStaff && <Link href="/dashboard/sessions" className="text-xs text-primary hover:text-primary/80 font-medium flex items-center gap-1 transition-colors">
                         View all <ArrowRight size={14} />
-                    </Link>
+                    </Link>}
                 </div>
 
                 {sessions.length === 0 ? (
@@ -171,12 +172,12 @@ export default async function DashboardPage() {
                                 <QrCode className="h-6 w-6 text-slate-400" />
                             </div>
                             <p className="text-sm font-medium text-slate-600 mb-1">No sessions yet</p>
-                            <p className="text-xs text-slate-400 mb-4">Connect your first WhatsApp device to get started</p>
-                            <Link href="/dashboard/sessions">
+                            <p className="text-xs text-slate-400 mb-4">{isStaff ? "Ask the account owner to share a WhatsApp number with you (Session Access)" : "Connect your first WhatsApp device to get started"}</p>
+                            {!isStaff && <Link href="/dashboard/sessions">
                                 <Button size="sm" variant="outline" className="gap-2">
                                     <Plus className="h-4 w-4" /> Create Session
                                 </Button>
-                            </Link>
+                            </Link>}
                         </CardContent>
                     </Card>
                 ) : (

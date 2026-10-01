@@ -4,7 +4,7 @@ import { normalizeMessageContent } from "@whiskeysockets/baileys";
 import { onMessageReceived, onMessageSent, dispatchWebhook, downloadAndSaveMedia } from "@/lib/webhook";
 import { handleBotCommand, setSessionStartTime } from "../bot/command-handler";
 import { handleOptOut } from "../safety";
-import { resolveToPhoneJid, isLidJid, normalizeJid } from "@/lib/jid-utils";
+import { resolveToPhoneJid, isLidJid, normalizeJid, lidToPhoneJidViaSocket } from "@/lib/jid-utils";
 
 import { Server } from "socket.io";
 import { logger } from "@/lib/logger";
@@ -137,13 +137,26 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
         for (const c of contacts) {
             try {
                 if (!c.id) continue;
+                // Baileys 7 often delivers contacts keyed by their LID (privacy id, "1234…@lid"), not by
+                // phone number. A LID is useless as a contact row (no number, name "Unknown", cannot be
+                // messaged from a list), so resolve it to the phone JID first and skip it if that fails.
+                const cAny = c as unknown as { phoneNumber?: string };
+                let contactJidResolved: string | null = null;
+                if (!isLidJid(c.id)) contactJidResolved = normalizeJid(c.id);
+                else if (cAny.phoneNumber && !isLidJid(cAny.phoneNumber)) contactJidResolved = normalizeJid(cAny.phoneNumber);
+                else contactJidResolved = await lidToPhoneJidViaSocket(sock, c.id);
+                if (!contactJidResolved) {
+                    logger.debug("Store", `contacts.upsert: no phone number known for ${c.id}, skipped`);
+                    continue;
+                }
+                const lidValue = isLidJid(c.id) ? c.id : (c.lid || undefined);
                 await prisma.contact.upsert({
-                    where: { sessionId_jid: { sessionId: dbSessionId, jid: c.id } },
+                    where: { sessionId_jid: { sessionId: dbSessionId, jid: contactJidResolved } },
                     create: {
                         sessionId: dbSessionId,
-                        jid: c.id,
+                        jid: contactJidResolved,
                         // @ts-ignore
-                        lid: c.lid || undefined,
+                        lid: lidValue,
                         name: c.name || c.notify || c.verifiedName,
                         notify: c.notify,
                         // @ts-ignore
@@ -153,7 +166,7 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
                     },
                     update: {
                         // @ts-ignore
-                        lid: c.lid || undefined,
+                        lid: lidValue,
                         name: c.name || undefined,
                         notify: c.notify || undefined,
                         // @ts-ignore
@@ -164,7 +177,7 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
                 });
 
                 // Dispatch webhook for contact update
-                dispatchWebhook(sessionId, "contact.update", { jid: c.id, name: c.name, notify: c.notify });
+                dispatchWebhook(sessionId, "contact.update", { jid: contactJidResolved, lid: lidValue, name: c.name, notify: c.notify });
             } catch (e) {
                 logger.error("Store", "Error saving contact", e);
             }
@@ -487,9 +500,11 @@ async function processAndSaveMessage(
     let normalizedRemoteJid = remoteJid;
     if (isLidJid(remoteJid)) {
         normalizedRemoteJid = await resolveToPhoneJid(remoteJid, dbSessionId, remoteJidAlt);
+        if (isLidJid(normalizedRemoteJid)) normalizedRemoteJid = (await lidToPhoneJidViaSocket(sock, remoteJid)) || normalizedRemoteJid;
     }
     if (senderJid && isLidJid(senderJid)) {
         senderJid = await resolveToPhoneJid(senderJid, dbSessionId, remoteJidAlt);
+        if (isLidJid(senderJid)) senderJid = (await lidToPhoneJidViaSocket(sock, senderJid)) || senderJid;
     }
 
 
@@ -537,7 +552,8 @@ async function processAndSaveMessage(
         
         // Ensure contact exists (Upsert Contact)
         const finalRemoteJid = normalizeJid(normalizedRemoteJid);
-        if (remoteJid && !remoteJid.includes('@g.us') && !remoteJid.includes('status@broadcast')) {
+        // No contact row for an unresolved LID: it has no phone number and would show up as "Unknown".
+        if (remoteJid && !remoteJid.includes('@g.us') && !remoteJid.includes('status@broadcast') && !isLidJid(finalRemoteJid)) {
             const contactJid = finalRemoteJid; // Use fully normalized JID
             const contactData: any = {
                 sessionId: dbSessionId,
@@ -612,3 +628,54 @@ async function processAndSaveMessage(
     }
 }
 // Placeholder - verified that I need to find the logic first
+
+
+/**
+ * One-off repair for contact rows that were created with a LID as their jid ("…@lid"). For each
+ * one, ask Baileys for the phone number; when known, merge the row into the phone-number contact
+ * (keeping the name) and delete the LID row. Rows that cannot be resolved are left (the Contacts
+ * API hides them). Runs after every successful connect; cheap when there is nothing to do.
+ */
+export async function mergeLidContacts(sock: WASocket, sessionId: string): Promise<{ merged: number; unresolved: number }> {
+    const session = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
+    if (!session) return { merged: 0, unresolved: 0 };
+    const lidRows = await prisma.contact.findMany({
+        where: { sessionId: session.id, jid: { endsWith: "@lid" } },
+        select: { id: true, jid: true, name: true, notify: true, verifiedName: true, profilePic: true, optedOut: true, optedOutAt: true }
+    });
+    let merged = 0, unresolved = 0;
+    for (const row of lidRows) {
+        try {
+            const pn = await lidToPhoneJidViaSocket(sock, row.jid);
+            if (!pn) { unresolved++; continue; }
+            await prisma.contact.upsert({
+                where: { sessionId_jid: { sessionId: session.id, jid: pn } },
+                create: {
+                    sessionId: session.id, jid: pn,
+                    // @ts-ignore
+                    lid: row.jid,
+                    name: row.name || undefined, notify: row.notify || undefined,
+                    // @ts-ignore
+                    verifiedName: row.verifiedName || undefined, profilePic: row.profilePic || undefined,
+                    optedOut: row.optedOut, optedOutAt: row.optedOutAt || undefined
+                },
+                update: {
+                    // @ts-ignore
+                    lid: row.jid,
+                    ...(row.name ? { name: row.name } : {}),
+                    ...(row.notify ? { notify: row.notify } : {}),
+                    ...(row.optedOut ? { optedOut: true, optedOutAt: row.optedOutAt || new Date() } : {})
+                }
+            });
+            await prisma.message.updateMany({ where: { sessionId: session.id, remoteJid: row.jid }, data: { remoteJid: pn } }).catch(() => {});
+            await prisma.message.updateMany({ where: { sessionId: session.id, senderJid: row.jid }, data: { senderJid: pn } }).catch(() => {});
+            await prisma.contact.delete({ where: { id: row.id } });
+            merged++;
+        } catch (e) {
+            logger.debug("Store", `mergeLidContacts: could not merge ${row.jid}`, e);
+            unresolved++;
+        }
+    }
+    if (lidRows.length > 0) logger.info("Store", `LID contacts for ${sessionId}: ${merged} merged into phone contacts, ${unresolved} still unresolved (hidden)`);
+    return { merged, unresolved };
+}
