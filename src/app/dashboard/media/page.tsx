@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -37,6 +38,7 @@ import {
     User as UserIcon,
     Smartphone,
     Contact,
+    Timer,
 } from "lucide-react";
 
 interface MediaFile {
@@ -122,6 +124,33 @@ export default function MediaPage() {
     const [totalSize, setTotalSize] = useState(0);
     const [totalCount, setTotalCount] = useState(0);
     const [loading, setLoading] = useState(true);
+    const { data: authSession } = useSession();
+    const isSuperAdmin = (authSession?.user as { role?: string } | undefined)?.role === "SUPERADMIN";
+    const [cleanup, setCleanup] = useState<{ retentionDays: number; lastCleanupAt: string | null; expiredCount: number; expiredBytes: number } | null>(null);
+    const [cleaning, setCleaning] = useState(false);
+
+    const fetchCleanupStatus = async () => {
+        try {
+            const res = await fetch("/api/media/cleanup");
+            if (!res.ok) return;
+            const json = await res.json();
+            if (json?.data) setCleanup(json.data);
+        } catch { /* superadmin only */ }
+    };
+
+    const runCleanupNow = async () => {
+        setCleaning(true);
+        try {
+            const res = await fetch("/api/media/cleanup", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+            const json = await res.json();
+            if (res.ok && json.status) toast.success(json.message); else toast.error(json.message || "Clean-up failed");
+            await Promise.all([fetchMedia(), fetchCleanupStatus()]);
+        } catch {
+            toast.error("Clean-up failed");
+        } finally {
+            setCleaning(false);
+        }
+    };
     const [searchQuery, setSearchQuery] = useState("");
     const [filterType, setFilterType] = useState<string>("all");
     const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -147,7 +176,11 @@ export default function MediaPage() {
         }
     };
 
-    useEffect(() => { fetchMedia(); }, []);
+    useEffect(() => {
+        fetchMedia();
+        fetchCleanupStatus();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const filteredFiles = useMemo(() => {
         return files.filter((f) => {
@@ -299,10 +332,24 @@ export default function MediaPage() {
                     <h1 className="text-xl font-bold text-foreground">Media Manager</h1>
                     <p className="text-sm text-muted-foreground mt-0.5">Manage downloaded media files</p>
                 </div>
-                <Button variant="outline" size="sm" className="gap-2 self-start" onClick={fetchMedia} disabled={loading}>
-                    <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
-                </Button>
+                <div className="flex gap-2 self-start">
+                    {isSuperAdmin && (
+                        <Button variant="outline" size="sm" className="gap-2" onClick={runCleanupNow} disabled={cleaning || !cleanup || cleanup.retentionDays <= 0} title={cleanup && cleanup.retentionDays <= 0 ? "Auto-cleanup is off (Settings → App Configuration)" : undefined}>
+                            <Timer className={`h-3.5 w-3.5 ${cleaning ? "animate-spin" : ""}`} /> Clean up now{cleanup && cleanup.expiredCount > 0 ? ` (${cleanup.expiredCount})` : ""}
+                        </Button>
+                    )}
+                    <Button variant="outline" size="sm" className="gap-2" onClick={fetchMedia} disabled={loading}>
+                        <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+                    </Button>
+                </div>
             </div>
+            {isSuperAdmin && cleanup && (
+                <p className="text-xs text-muted-foreground -mt-2">
+                    {cleanup.retentionDays > 0
+                        ? <>Auto-cleanup: files older than <strong>{cleanup.retentionDays} days</strong> are deleted every night at 3:30 AM{cleanup.expiredCount > 0 ? <> — <strong>{cleanup.expiredCount}</strong> file(s) ({formatFileSize(cleanup.expiredBytes)}) are due now</> : " — nothing due right now"}.{cleanup.lastCleanupAt ? ` Last run ${new Date(cleanup.lastCleanupAt).toLocaleString()}.` : ""} Change the retention in Settings → App Configuration.</>
+                        : <>Auto-cleanup is <strong>off</strong>. Set a retention in Settings → App Configuration to delete old chat media automatically.</>}
+                </p>
+            )}
 
             {/* Stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

@@ -5,6 +5,7 @@ import { waManager } from "@/modules/whatsapp/manager";
 import { logger } from "./logger";
 import { getEngagementStats, MONITOR } from "@/modules/whatsapp/safety";
 import { sendAlert } from "./alerts";
+import { runMediaCleanup } from "./media-cleanup";
 
 /**
  * Scheduled-message runner.
@@ -147,6 +148,11 @@ export function initScheduler() {
 
     // Engagement monitor: every 30 minutes, warn once a day per session when a lot was sent and almost nobody replied
     cron.schedule("*/30 * * * *", () => { runEngagementMonitor().catch(e => logger.error("Monitor", "engagement monitor failed", e)); });
+
+    // Media retention: delete downloaded chat media older than SystemConfig.mediaRetentionDays.
+    // Nightly at 03:30 server time, plus one pass 3 minutes after boot (covers servers that were off at night).
+    cron.schedule("30 3 * * *", () => { runMediaCleanup().catch(e => logger.error("MediaCleanup", "nightly clean-up failed", e)); });
+    setTimeout(() => { runMediaCleanup().catch(e => logger.error("MediaCleanup", "boot clean-up failed", e)); }, 3 * 60 * 1000).unref();
 
     logger.info("Cron", "Scheduler initialized");
 }

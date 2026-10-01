@@ -326,6 +326,10 @@ model SystemConfig {
 
   // Which dashboard modules are visible to non-superadmin users (array of nav hrefs). null = all.
   enabledModules       Json?
+
+  // Downloaded chat media (data/media) older than this many days is deleted every night. 0 = keep forever.
+  mediaRetentionDays   Int      @default(30)
+  mediaLastCleanupAt   DateTime?
   
   updatedAt          DateTime @updatedAt
 }

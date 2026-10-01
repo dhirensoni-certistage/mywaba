@@ -9,8 +9,18 @@ git fetch origin main
 git checkout -q main
 git pull --ff-only origin main
 
-echo "==> Installing dependencies (applies patches via postinstall)"
-npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+# `npm ci` wipes node_modules first, and the app that is still running meanwhile starts throwing
+# "Cannot find module 'next/dist/compiled/...'" until PM2 reloads it. Only reinstall when the
+# lockfile actually changed since the last deploy (hash kept inside node_modules).
+LOCK_HASH="$(sha256sum package-lock.json | cut -c1-64)"
+STAMP="node_modules/.deploy-lock-hash"
+if [ -d node_modules ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$LOCK_HASH" ]; then
+  echo "==> Dependencies unchanged (lockfile hash matches) — skipping npm ci"
+else
+  echo "==> Installing dependencies (applies patches via postinstall)"
+  npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+  echo "$LOCK_HASH" > "$STAMP"
+fi
 
 echo "==> Syncing database schema"
 npx prisma db push --accept-data-loss=false 2>/dev/null || npx prisma db push

@@ -21,7 +21,8 @@ export default function SettingsPage() {
         appName: "WABA",
         logoUrl: "",
         timezone: "Asia/Kolkata",
-        enableRegistration: true
+        enableRegistration: true,
+        mediaRetentionDays: 30
     });
     const [systemLoading, setSystemLoading] = useState(false);
     const [alerts, setAlerts] = useState({
@@ -68,7 +69,8 @@ export default function SettingsPage() {
                         // @ts-ignore
                         faviconUrl: data.faviconUrl || "/favicon.ico",
                         timezone: data.timezone || "Asia/Jakarta",
-                        enableRegistration: data.enableRegistration !== undefined ? data.enableRegistration : true
+                        enableRegistration: data.enableRegistration !== undefined ? data.enableRegistration : true,
+                        mediaRetentionDays: data.mediaRetentionDays ?? 30
                     });
                     setAlerts({
                         alertsEnabled: data.alertsEnabled ?? true,
@@ -285,6 +287,23 @@ export default function SettingsPage() {
                             id="enable-registration"
                             checked={systemConfig.enableRegistration}
                             onCheckedChange={c => setSystemConfig(prev => ({ ...prev, enableRegistration: c }))}
+                            disabled={!isSuperAdmin}
+                        />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/50">
+                        <Label htmlFor="media-retention" className="flex flex-col space-y-1">
+                            <span>Media auto-cleanup (days)</span>
+                            <span className="font-normal text-xs text-muted-foreground">Downloaded chat media (images, videos, audio, documents) older than this is deleted every night at 3:30 AM and the message keeps only its text. 0 = keep forever. Uploaded files for auto-replies, scheduled messages and broadcasts are never touched. Run it manually from Media Manager.</span>
+                        </Label>
+                        <input
+                            id="media-retention"
+                            type="number"
+                            min={0}
+                            max={3650}
+                            className={`${inputClass} w-24 shrink-0`}
+                            value={systemConfig.mediaRetentionDays}
+                            onChange={(e) => setSystemConfig(prev => ({ ...prev, mediaRetentionDays: Math.max(0, Math.min(3650, parseInt(e.target.value || "0", 10) || 0)) }))}
                             disabled={!isSuperAdmin}
                         />
                     </div>
