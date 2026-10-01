@@ -7,6 +7,8 @@ import {
     loadContactsForJids, personalize, hasPersonalization, type SafetyConfig, type TemplateVars
 } from "./safety";
 import { sendInteractiveMessage, sanitizeButtons, type BroadcastButton } from "./interactive";
+import { checkNumbers } from "./number-check";
+import { sendAlert } from "@/lib/alerts";
 
 /**
  * Broadcast engine — anti-ban aware bulk sender.
@@ -45,8 +47,8 @@ export const BROADCAST_LIMITS = {
     DEFAULT_BATCH_PAUSE_MS: 60000,
     MIN_BATCH_PAUSE_MS: 15000,
     MAX_BATCH_PAUSE_MS: 600000,
-    /** Max recipients accepted in a single broadcast. */
-    MAX_RECIPIENTS: 500,
+    /** Max recipients accepted in a single broadcast (per number). The daily limit is the real governor. */
+    MAX_RECIPIENTS: 5000,
     /** Abort after this many consecutive send failures. */
     MAX_CONSECUTIVE_FAILURES: 5,
     /** How long to wait for a session to come back before aborting (ms). */
@@ -92,6 +94,8 @@ export interface BroadcastOptions {
     buttons?: Array<{ type?: string; text: string; url?: string; phone?: string }> | BroadcastButton[];
     /** Optional footer line under the button message. */
     footer?: string;
+    /** Id of the broadcast this run retries (stored in options for history). */
+    retryOf?: string;
 }
 
 export interface BroadcastHealth {
@@ -387,8 +391,14 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
             message: opts.message || (opts.mediaUrl ? `[Media: ${opts.mediaType || "file"}]` : ""),
             total: jids.length,
             delay: delayMs,
+            mediaUrl: opts.mediaUrl || null,
+            mediaType: opts.mediaUrl ? (opts.mediaType || "image") : null,
+            options: {
+                batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours,
+                buttons, footer: footer || null, retryOf: opts.retryOf || null
+            } as any,
             status: "running",
-            recipients: { create: jids.map(jid => ({ jid, status: "pending" })) }
+            recipients: { create: recipients.map(r => ({ jid: r.jid, status: "pending", vars: Object.keys(r.vars).length ? (r.vars as any) : undefined })) }
         }
     });
 
@@ -486,6 +496,40 @@ async function runBroadcast(args: RunArgs) {
         logger[status === "completed" ? "success" : "warn"]("Broadcast",
             `${broadcastId} ${status}: ${sent} sent, ${failed} failed (${skipped} skipped as invalid) of ${total}${error ? ` — ${error}` : ""}`
         );
+
+        // ---- Alerts: anything other than a clean completion, plus a nearly-used daily budget ----
+        try {
+            const owner = await prisma.session.findUnique({ where: { sessionId }, select: { userId: true } });
+            const realFailures = failed - skipped;
+            if (status !== "completed" || realFailures > 0) {
+                await sendAlert({
+                    kind: "broadcast",
+                    title: status === "completed"
+                        ? `Broadcast finished with ${realFailures} failure(s) on ${sessionId}`
+                        : `Broadcast ${status} on ${sessionId}`,
+                    message: `${sent} sent, ${failed} failed (${skipped} skipped as not on WhatsApp / opted out) of ${total}.${error ? `\nReason: ${error}` : ""}\nOpen Broadcast → History → Detail to retry the failed recipients.`,
+                    userId: owner?.userId,
+                    href: "/dashboard/broadcast",
+                    dedupeKey: `broadcast:${broadcastId}`
+                });
+            }
+            if (safety.dailyBroadcastLimit > 0) {
+                const used = sentBefore + sent;
+                const pct = Math.round((used / safety.dailyBroadcastLimit) * 100);
+                if (pct >= 80) {
+                    await sendAlert({
+                        kind: "limit",
+                        title: `${sessionId}: ${pct}% of the daily broadcast limit used`,
+                        message: `${used} of ${safety.dailyBroadcastLimit} messages sent in the last 24 hours. Further broadcasts on this number will be refused once the limit is reached. Use another connected number or wait.`,
+                        userId: owner?.userId,
+                        href: "/dashboard/broadcast",
+                        dedupeKey: `limit:${sessionId}:${pct >= 100 ? "full" : "80"}`
+                    });
+                }
+            }
+        } catch (e) {
+            logger.debug("Broadcast", "alert dispatch failed", e);
+        }
     };
 
     const progress = () => Math.round(((sent + failed) / total) * 100);
@@ -500,32 +544,25 @@ async function runBroadcast(args: RunArgs) {
             const okSet = new Set<string>(others);
             const resolvedJid = new Map<string, string>();
 
-            for (let i = 0; i < phoneJids.length; i += BROADCAST_LIMITS.CHECK_CHUNK_SIZE) {
-                if (cancelledBroadcasts.has(broadcastId)) { await finish("cancelled"); return; }
-
-                const chunk = phoneJids.slice(i, i + BROADCAST_LIMITS.CHECK_CHUNK_SIZE);
+            if (phoneJids.length > 0) {
                 const conn = await waitForConnection(sessionId, broadcastId, emit, BROADCAST_LIMITS.RECONNECT_WAIT_MS);
                 if (!conn.socket) {
                     if (conn.reason === "cancelled") { await finish("cancelled"); return; }
                     await finish("failed", conn.reason);
                     return;
                 }
-
                 try {
-                    const numbers = chunk.map(j => j.split("@")[0]);
-                    const results = (await conn.socket.onWhatsApp(...numbers)) || [];
-                    const existing = new Map<string, string>();
-                    for (const r of results) {
-                        if (r?.exists && r.jid) {
-                            existing.set(r.jid.split("@")[0].replace(/:\d+$/, ""), r.jid);
-                        }
-                    }
-                    for (const jid of chunk) {
-                        const number = jid.split("@")[0];
-                        const match = existing.get(number);
-                        if (match) {
+                    // Cached per session for 24h — numbers already checked in the pre-check dialog cost nothing here.
+                    const results = await checkNumbers(sessionId, phoneJids, {
+                        onProgress: (done, total) => emit({ status: "running", sent, failed, skipped, progress: progress(), current: null, note: `Validating numbers… ${done}/${total}` })
+                    });
+                    for (let i = 0; i < phoneJids.length; i++) {
+                        const jid = phoneJids[i];
+                        const r = results[i];
+                        if (cancelledBroadcasts.has(broadcastId)) { await finish("cancelled"); return; }
+                        if (r?.exists) {
                             okSet.add(jid);
-                            if (match !== jid) resolvedJid.set(jid, match);
+                            if (r.jid && r.jid !== jid) resolvedJid.set(jid, r.jid);
                         } else {
                             skipped++;
                             failed++;
@@ -535,12 +572,9 @@ async function runBroadcast(args: RunArgs) {
                     }
                 } catch (e) {
                     // If the lookup itself fails, don't punish the recipients — send anyway.
-                    logger.warn("Broadcast", `${broadcastId}: onWhatsApp lookup failed, sending without validation for this chunk`, describeSendError(e));
-                    chunk.forEach(j => okSet.add(j));
+                    logger.warn("Broadcast", `${broadcastId}: number validation failed, sending without validation`, describeSendError(e));
+                    phoneJids.forEach(j => okSet.add(j));
                 }
-
-                emit({ status: "running", sent, failed, skipped, progress: progress(), current: null, note: `Validating numbers… ${Math.min(i + chunk.length, phoneJids.length)}/${phoneJids.length}` });
-                await sleep(randomBetween(400, 900));
             }
 
             for (const jid of jids) {

@@ -55,6 +55,27 @@ named `phone`, `number`, `mobile`, `whatsapp` or `contact` with the full interna
 as `{city}` or `{city|your area}` in the message or caption. Numbers not on WhatsApp are still validated
 and skipped at send time. Max 5000 rows per file, 500 recipients per number per run.
 
+## Number check before sending
+
+Pressing **Start** first validates the whole list (paged, cached per session for 24 h) and opens a
+summary: uploaded / on WhatsApp / not on WhatsApp or invalid / opted out, with the full list of
+problem numbers (copyable). **Remove N & keep M** drops them from the list; **Start anyway** lets the
+engine skip them at send time. The same check is available any time via **Check numbers**.
+
+## Retry failed
+
+History → Detail → **Retry failed (N)** starts a new run with the same message, media, buttons and
+pacing for the recipients that failed for a *temporary* reason (connection lost, logout, cancelled,
+daily limit, server restart, send error). Numbers that are not on WhatsApp or opted out are never
+retried. Per-recipient variables are preserved, so `{name}` still works. The daily limit applies.
+
+## Alerts
+
+Settings → Alerts (superadmin): Telegram (bot token + chat id, no server change) and/or email
+(`SMTP_*` in `.env`). Alerts fire for: session logged out or auto-stopped (with the WhatsApp reason),
+a broadcast that stopped or had delivery failures, and a number reaching 80% / 100% of its daily
+limit. Identical alerts are suppressed for 5 minutes. **Send Test Alert** verifies the channel.
+
 ## Buttons (BETA)
 
 Quick-reply, link and call buttons (max 3) can be attached on the Broadcast page. WhatsApp supports

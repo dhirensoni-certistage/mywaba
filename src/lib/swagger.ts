@@ -1218,6 +1218,40 @@ All endpoints require authentication via:
                         }
                     }
                 },
+                "/messages/{sessionId}/broadcast/recipients/check": {
+                    post: {
+                        tags: ["Messaging"],
+                        summary: "Check which numbers are on WhatsApp / opted out",
+                        description: "Body { numbers: string[] } (max 300 per call). Returns per-number status ok | not_on_whatsapp | invalid | opted_out plus a summary. Results are cached per session for 24h and reused by the broadcast engine.",
+                        parameters: [{ name: "sessionId", in: "path", required: true, schema: { type: "string" } }],
+                        requestBody: { content: { "application/json": { schema: { type: "object", required: ["numbers"], properties: { numbers: { type: "array", items: { type: "string" }, maxItems: 300 } } } } } },
+                        responses: {
+                            200: { description: "{ results: [{ input, number, jid, status }], summary: { total, ok, notOnWhatsApp, invalid, optedOut } }" },
+                            400: { description: "numbers missing or more than 300" },
+                            401: { $ref: "#/components/responses/Unauthorized" },
+                            403: { $ref: "#/components/responses/Forbidden" },
+                            503: { $ref: "#/components/responses/SessionNotReady" }
+                        }
+                    }
+                },
+                "/messages/{sessionId}/broadcast/{broadcastId}/retry": {
+                    post: {
+                        tags: ["Messaging"],
+                        summary: "Retry the failed recipients of a finished broadcast",
+                        description: "Starts a new broadcast (same message, media, buttons, pacing) for recipients that failed for a temporary reason. Not-on-WhatsApp and opted-out numbers are excluded unless { includePermanent: true }.",
+                        parameters: [
+                            { name: "sessionId", in: "path", required: true, schema: { type: "string" } },
+                            { name: "broadcastId", in: "path", required: true, schema: { type: "string" } }
+                        ],
+                        responses: {
+                            200: { description: "{ broadcastId, total, permanentSkipped, retryOf }" },
+                            400: { description: "Nothing to retry, or daily limit reached" },
+                            404: { description: "Broadcast not found" },
+                            409: { description: "Broadcast is still running" },
+                            503: { $ref: "#/components/responses/SessionNotReady" }
+                        }
+                    }
+                },
                 "/messages/{sessionId}/broadcast/{broadcastId}/cancel": {
                     post: {
                         tags: ["Messaging"],

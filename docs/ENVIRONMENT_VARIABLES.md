@@ -116,6 +116,11 @@ Required ONLY if utilizing the `docker-compose.yml` stack deployment.
 | :--- | :--- | :--- | :--- |
 | `MYSQL_ROOT_PASSWORD` | **Yes** | — | Root access password for the MySQL container. |
 | `MYSQL_DATABASE` | No | `wa_akg` | Target schema database name. |
+| `SMTP_HOST` | No | — | SMTP server for email alerts (Settings → Alerts). Telegram alerts need no env. |
+| `SMTP_PORT` | No | `587` | SMTP port. |
+| `SMTP_USER` / `SMTP_PASS` | No | — | SMTP credentials. |
+| `SMTP_FROM` | No | `SMTP_USER` | From address for alert emails. |
+| `SMTP_SECURE` | No | — | `true` for implicit TLS (port 465). |
 | `ADMIN_EMAIL` | **Yes** | — | Email of the default SuperAdmin generated on first boot. |
 | `ADMIN_PASSWORD` | **Yes** | — | Password of the default SuperAdmin generated on first boot. |
 

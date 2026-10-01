@@ -11,6 +11,10 @@
 - **Stale session selection across accounts**: The `sessionId` cookie is cleared when it points to a session the current user cannot access.
 
 ### Added
+- **Number pre-check with one-click clean-up**: Start validates the whole list first (`POST …/broadcast/recipients/check`, 300 numbers per page, results cached per session for 24h in `src/modules/whatsapp/number-check.ts`) and shows uploaded / on WhatsApp / not on WhatsApp / invalid / opted out with the problem list; **Remove & keep** drops them, **Start anyway** lets the engine skip them. The engine's own validation now uses the same cache, so pre-checked lists are not looked up twice.
+- **Retry failed** (`POST …/broadcast/{id}/retry`, button in History → Detail): re-sends temporary failures with the same message, media, buttons and pacing; permanent failures (not on WhatsApp, opted out) are excluded. `BroadcastLog` now stores `mediaUrl`, `mediaType`, `options`; `BroadcastRecipient` stores `vars` so retries stay personalised.
+- **Alerts** (`src/lib/alerts.ts`, Settings → Alerts, `POST /api/settings/alerts/test`): Telegram bot and/or SMTP email (`SMTP_*` env) for session logout / auto-stop, broadcasts that stopped or had failures, and 80% / 100% of the daily limit. 5-minute de-duplication; dashboard notification for the owner as well. New `SystemConfig` alert columns.
+- **On-page guidance**: "Before you press Start" tips card and expanded Safety Guide tab (scaling safely, Excel upload, buttons, retries, alerts, roles).
 - **Excel / CSV recipient upload** (`POST /api/messages/{sessionId}/broadcast/recipients/parse`, exceljs): header-based detection of the number and name columns, preview in the dashboard, every column available as a `{column}` / `{column|fallback}` placeholder in the message or caption. Broadcast recipients may now be objects `{ number, name, vars }`.
 - **Spread evenly over N hours**: even pacing for big lists (overrides delay/batch settings; never below the 3 s minimum).
 - **Multi-number rotation**: `sessionIds[]` splits the list round-robin across other connected sessions the user can access; one run per number with its own daily limit, progress card and Stop button ("Stop all" for the group).
@@ -31,7 +35,7 @@
   - "typing…" presence before each message
   - media is fetched once instead of being re-downloaded per recipient
   - circuit breaker after 5 consecutive send failures
-  - maximum 500 recipients per broadcast
+  - maximum 5000 recipients per number per broadcast (the daily limit is the real governor)
   - new `POST /api/messages/{sessionId}/broadcast/{broadcastId}/cancel` and a Stop button in the dashboard
   - new `GET /api/messages/{sessionId}/broadcast` returning the server-side safety limits
 - **Session reconnect**: exponential backoff (3s → 60s, 5 attempts) instead of 3 × 3s; `515 restartRequired` reconnects immediately without counting as a failure. The disconnect reason is logged and the session owner receives a dashboard notification explaining a logout or auto-stop.
@@ -46,7 +50,7 @@
 - **Session detail page** polls status/metrics every 15s instead of every 3s (6 `COUNT(*)` queries on the Message table per 3s per open tab). Status changes still arrive instantly over the socket.
 
 ### Database
-- `BroadcastLog.error` (nullable text); `BotConfig.dailyBroadcastLimit`, `quietHoursStart`, `quietHoursEnd`, `optOutEnabled`, `optOutKeywords`, `optOutReply`; `Contact.optedOut`, `optedOutAt` — run `npx prisma db push` (done automatically by `start.sh`).
+- `BroadcastLog.error`, `mediaUrl`, `mediaType`, `options`; `BroadcastRecipient.vars`; `SystemConfig.alertsEnabled`, `alertTelegramToken`, `alertTelegramChatId`, `alertEmail`, `alertOnLogout`, `alertOnBroadcast`, `alertOnLimit`; `BotConfig.dailyBroadcastLimit`, `quietHoursStart`, `quietHoursEnd`, `optOutEnabled`, `optOutKeywords`, `optOutReply`; `Contact.optedOut`, `optedOutAt` — run `npx prisma db push` (done automatically by `start.sh`).
 
 ## [v1.6.4] - 2026-07-12
 

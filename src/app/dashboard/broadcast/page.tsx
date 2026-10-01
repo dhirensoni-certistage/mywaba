@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { RefreshCw, Send, CheckCircle2, XCircle, Radio, Clock, AlertTriangle, History, Eye, Calendar, Ban, ShieldCheck, Info, Gauge, MoonStar, UserX, BookOpen, FileSpreadsheet, Upload, X, Plus, Smartphone, Timer, MousePointerClick } from "lucide-react";
+import { RefreshCw, Send, CheckCircle2, XCircle, Radio, Clock, AlertTriangle, History, Eye, Calendar, Ban, ShieldCheck, Info, Gauge, MoonStar, UserX, BookOpen, FileSpreadsheet, Upload, X, Plus, Smartphone, Timer, MousePointerClick, RotateCcw, ListChecks, Lightbulb } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/components/dashboard/session-provider";
 import { useSession as useAuthSession } from "next-auth/react";
@@ -48,6 +48,17 @@ interface UploadedList {
     truncated: number;
 }
 
+type CheckStatus = "ok" | "not_on_whatsapp" | "invalid" | "opted_out";
+interface CheckRow { input: string; number: string | null; jid: string | null; status: CheckStatus }
+interface CheckState {
+    running: boolean;
+    done: number;
+    total: number;
+    rows: CheckRow[];
+    /** Signature of the list that was checked, so edits invalidate the result */
+    signature: string;
+}
+
 interface ButtonDraft {
     type: "reply" | "url" | "call";
     text: string;
@@ -77,7 +88,7 @@ const LIMITS = {
     DEFAULT_BATCH_PAUSE_MS: 60000,
     MIN_BATCH_PAUSE_MS: 15000,
     MAX_BATCH_PAUSE_MS: 600000,
-    MAX_RECIPIENTS: 500,
+    MAX_RECIPIENTS: 5000,
 };
 
 interface BroadcastLog {
@@ -117,6 +128,9 @@ export default function BroadcastPage() {
     const [footer, setFooter] = useState("");
     const [limitDraft, setLimitDraft] = useState<string>("");
     const [savingLimit, setSavingLimit] = useState(false);
+    const [check, setCheck] = useState<CheckState | null>(null);
+    const [checkOpen, setCheckOpen] = useState(false);
+    const [retrying, setRetrying] = useState(false);
     const [message, setMessage] = useState("");
     const [mediaUrl, setMediaUrl] = useState("");
     const [mediaType, setMediaType] = useState("image");
@@ -279,6 +293,92 @@ export default function BroadcastPage() {
         }
     };
 
+    /** The recipient list as the user sees it right now (numbers only). */
+    const currentNumbers = (): string[] =>
+        uploaded ? uploaded.rows.map(r => r.number) : Array.from(new Set(contacts.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean)));
+    const listSignature = (nums: string[]) => `${sessionId}:${nums.length}:${nums.slice(0, 50).join(",")}:${nums.slice(-50).join(",")}`;
+
+    /** Validate every number on WhatsApp (paged, cached server-side) and open the result dialog. */
+    const runPreCheck = async (): Promise<CheckState | null> => {
+        if (!sessionId) return null;
+        const nums = currentNumbers();
+        if (nums.length === 0) { toast.error("No recipients to check"); return null; }
+        const signature = listSignature(nums);
+        const state: CheckState = { running: true, done: 0, total: nums.length, rows: [], signature };
+        setCheck(state);
+        setCheckOpen(true);
+        const PAGE = 300;
+        const rows: CheckRow[] = [];
+        try {
+            for (let i = 0; i < nums.length; i += PAGE) {
+                const page = nums.slice(i, i + PAGE);
+                const res = await fetch(`/api/messages/${sessionId}/broadcast/recipients/check`, {
+                    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ numbers: page })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.status) throw new Error(data.message || "Check failed");
+                rows.push(...(data.data.results as CheckRow[]));
+                setCheck(prev => prev ? { ...prev, done: Math.min(nums.length, i + page.length), rows: [...rows] } : prev);
+            }
+            const finalState: CheckState = { running: false, done: nums.length, total: nums.length, rows, signature };
+            setCheck(finalState);
+            return finalState;
+        } catch (e: any) {
+            toast.error(e?.message || "Could not check numbers");
+            setCheck(null);
+            setCheckOpen(false);
+            return null;
+        }
+    };
+
+    const problemRows = (c: CheckState | null) => (c?.rows || []).filter(r => r.status !== "ok");
+    const checkIsCurrent = !!check && !check.running && check.signature === listSignature(currentNumbers());
+
+    /** Drop every number that is not on WhatsApp / invalid / opted out from the list. */
+    const removeProblemNumbers = () => {
+        if (!check) return;
+        const bad = new Set(problemRows(check).map(r => r.number || r.input));
+        const badInputs = new Set(problemRows(check).map(r => r.input));
+        if (uploaded) {
+            const rows = uploaded.rows.filter(r => !bad.has(r.number));
+            setUploaded({ ...uploaded, rows });
+        } else {
+            const kept = contacts.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean).filter(n => !badInputs.has(n) && !bad.has(n.replace(/[^0-9]/g, "")));
+            setContacts(kept.join("\n"));
+        }
+        const okRows = check.rows.filter(r => r.status === "ok");
+        const nums = okRows.map(r => r.number!).filter(Boolean);
+        setCheck({ ...check, rows: okRows, total: okRows.length, done: okRows.length, signature: listSignature(nums) });
+        setValidateNumbers(false); // already validated — the engine will not look them up again
+        toast.success(`${bad.size} number(s) removed. ${okRows.length} valid recipients remain.`);
+    };
+
+    /** Retry the deliverable failures of a finished broadcast with the same message/media. */
+    const handleRetry = async (log: BroadcastLog) => {
+        if (!sessionId) return;
+        setRetrying(true);
+        try {
+            const res = await fetch(`/api/messages/${sessionId}/broadcast/${log.id}/retry`, { method: "POST" });
+            const data = await res.json();
+            if (res.ok && data.status) {
+                toast.success(data.message || "Retry started");
+                setDetailOpen(false);
+                setActiveTab("new");
+                setLoading(true);
+                setProgressMap({});
+                fetchHistory();
+            } else {
+                toast.error(data.message || "Retry failed");
+            }
+        } catch {
+            toast.error("Retry failed");
+        } finally {
+            setRetrying(false);
+        }
+    };
+    const retryableCount = (log: BroadcastLog | null) =>
+        (log?.recipients || []).filter(r => r.status !== "sent" && !/not registered on WhatsApp|opted out/i.test(r.error || "")).length;
+
     const otherConnectedSessions = sessions.filter(s => s.sessionId !== sessionId && s.status === "CONNECTED");
     const toggleExtraSession = (id: string) =>
         setExtraSessions(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -309,9 +409,24 @@ export default function BroadcastPage() {
         }
     };
 
-    const handleSend = async () => {
+    const handleSend = async (opts: { skipPreCheck?: boolean } = {}) => {
         if (!sessionId) return toast.error("No active session found");
         if (!message.trim() && !mediaUrl.trim()) return toast.error("Message or media cannot be empty");
+
+        // First run: validate the whole list and show what will be dropped before anything is sent.
+        if (!opts.skipPreCheck && !checkIsCurrent) {
+            const result = await runPreCheck();
+            if (!result) return;
+            if (problemRows(result).length === 0) {
+                setCheckOpen(false);
+                toast.success(`All ${result.total} numbers are on WhatsApp.`);
+                setValidateNumbers(false);
+            } else {
+                return; // dialog is open — user decides (remove & start / start anyway / cancel)
+            }
+        }
+
+        setCheckOpen(false);
         setLoading(true);
         setProgressMap({});
 
@@ -748,6 +863,17 @@ export default function BroadcastPage() {
                                         )}
 
                                         {recipientCount > 0 && (
+                                            <div className="flex items-center justify-between gap-2 text-xs">
+                                                <span className={`flex items-center gap-1.5 ${checkIsCurrent ? "text-green-600" : "text-muted-foreground"}`}>
+                                                    <ListChecks className="h-3.5 w-3.5" />
+                                                    {checkIsCurrent ? `All ${recipientCount} numbers validated on WhatsApp` : "Numbers not validated yet — Start will check them first"}
+                                                </span>
+                                                <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => runPreCheck()} disabled={loading || !sessionId || (check?.running ?? false)}>
+                                                    {check?.running ? <RefreshCw className="h-3 w-3 mr-1 animate-spin" /> : <ListChecks className="h-3 w-3 mr-1" />} Check numbers
+                                                </Button>
+                                            </div>
+                                        )}
+                                        {recipientCount > 0 && (
                                             <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                                                 <Clock className="h-3.5 w-3.5" />
                                                 Estimated time for {recipientCount} recipients{numberCount > 1 ? ` on ${numberCount} numbers` : ""}: ~{formatDuration(estimateSeconds)}
@@ -756,7 +882,7 @@ export default function BroadcastPage() {
 
                                         <Button
                                             className="w-full"
-                                            onClick={handleSend}
+                                            onClick={() => handleSend()}
                                             disabled={loading || !sessionId || recipientCount === 0 || (!message.trim() && !mediaUrl.trim())}
                                         >
                                             {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
@@ -766,6 +892,26 @@ export default function BroadcastPage() {
                                 </CardContent>
                             </Card>
                         </div>
+
+                        {/* Things to care about — on the page, not only in chat */}
+                        <Card className="border-blue-500/30 bg-blue-50/30 dark:bg-blue-950/10">
+                            <CardContent className="pt-5">
+                                <div className="flex gap-3">
+                                    <Lightbulb className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+                                    <div className="text-xs text-muted-foreground space-y-1.5 w-full">
+                                        <p className="font-medium text-foreground text-sm">Before you press Start</p>
+                                        <ul className="grid sm:grid-cols-2 gap-x-6 gap-y-1 list-disc pl-4">
+                                            <li><strong className="text-foreground">Big list?</strong> Use <em>Spread evenly over hours</em> or add more connected numbers — do not raise one number&apos;s daily limit.</li>
+                                            <li><strong className="text-foreground">Personalise.</strong> <code className="bg-muted px-1 rounded">{"{name|there}"}</code> and <code className="bg-muted px-1 rounded">{"{Hi|Hello}"}</code>; identical texts get flagged.</li>
+                                            <li><strong className="text-foreground">Validate first.</strong> Start checks every number and shows what is not on WhatsApp — remove them, don&apos;t send to dead numbers.</li>
+                                            <li><strong className="text-foreground">Buttons are Beta.</strong> They show on most Android phones, often not on iPhone. Test with 5 people first.</li>
+                                            <li><strong className="text-foreground">Something failed?</strong> History → Detail → <em>Retry failed</em> re-sends only the deliverable ones.</li>
+                                            <li><strong className="text-foreground">Logged out mid-run?</strong> Stop for 24 hours, re-link, resume at half the volume. Alerts for this: Settings → Alerts.</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
 
                         {/* Number health */}
                         {health && (
@@ -1090,6 +1236,48 @@ export default function BroadcastPage() {
 
                         <Card>
                             <CardHeader>
+                                <CardTitle className="text-base">Sending more without more risk</CardTitle>
+                            </CardHeader>
+                            <CardContent className="text-sm">
+                                <ul className="list-disc pl-5 space-y-1.5 text-muted-foreground">
+                                    <li><strong className="text-foreground">The daily limit is per number.</strong> Raising it on one number raises that number&apos;s ban risk. 200 is a safe default for a warmed-up number.</li>
+                                    <li><strong className="text-foreground">Spread evenly over hours</strong> — 500 recipients over 10 hours is one message every ~70 s, which looks like a person chatting, not a blast.</li>
+                                    <li><strong className="text-foreground">Several numbers</strong> — tick other connected sessions under Recipients; the list is split and each number keeps its own limit. 4 numbers × 200 = 800/day.</li>
+                                    <li>Never shorten the 3 s minimum, never send the same list twice a day from one number, never use fresh SIMs for volume.</li>
+                                </ul>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">Excel / CSV upload &amp; personalisation</CardTitle>
+                            </CardHeader>
+                            <CardContent className="text-sm">
+                                <ul className="list-disc pl-5 space-y-1.5 text-muted-foreground">
+                                    <li>First row = header. Need a <code className="bg-muted px-1 rounded">phone</code> / <code className="bg-muted px-1 rounded">number</code> / <code className="bg-muted px-1 rounded">mobile</code> column with country code (919876543210); <code className="bg-muted px-1 rounded">name</code> is optional.</li>
+                                    <li>Every column becomes a placeholder: <code className="bg-muted px-1 rounded">{"{city}"}</code>, <code className="bg-muted px-1 rounded">{"{city|your area}"}</code>. Click a chip after upload to insert it.</li>
+                                    <li>Pressing Start checks all numbers first and shows which are not on WhatsApp, invalid or opted out — remove them with one click.</li>
+                                    <li>Max 5000 rows per file. Results of the check are cached for 24 hours.</li>
+                                </ul>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">Buttons (Beta), retries &amp; alerts</CardTitle>
+                            </CardHeader>
+                            <CardContent className="text-sm">
+                                <ul className="list-disc pl-5 space-y-1.5 text-muted-foreground">
+                                    <li><strong className="text-foreground">Buttons</strong> are officially supported only on the WhatsApp Business API. From a linked device they render on most Android phones and often not on iPhone / Web. If WhatsApp rejects them the run continues as plain text. Test with a few people first.</li>
+                                    <li><strong className="text-foreground">Retry failed</strong> (History → Detail) re-sends only recipients that failed for a temporary reason. Not-on-WhatsApp and opted-out numbers are never retried.</li>
+                                    <li><strong className="text-foreground">Alerts</strong> (Settings → Alerts, superadmin): Telegram or email when a session is logged out / stopped, a broadcast has failures, or a number used 80% of its daily limit.</li>
+                                    <li><strong className="text-foreground">Staff accounts</strong> can broadcast and chat on shared sessions but cannot change settings, sessions, webhooks or limits — ask the owner.</li>
+                                </ul>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
                                 <CardTitle className="text-base">What the engine does for you</CardTitle>
                             </CardHeader>
                             <CardContent className="text-sm">
@@ -1099,13 +1287,106 @@ export default function BroadcastPage() {
                                     <li>Shows &quot;typing…&quot; before each message and sends in random order.</li>
                                     <li>Enforces the daily limit and quiet hours; skips contacts who replied STOP.</li>
                                     <li>Waits through short reconnects, stops cleanly on logout and after 5 consecutive failures, and records the reason.</li>
-                                    <li>Max {LIMITS.MAX_RECIPIENTS} recipients per run; Stop button at any time.</li>
+                                    <li>Up to {LIMITS.MAX_RECIPIENTS} recipients per number per run (the daily limit still applies); Stop button at any time.</li>
                                 </ul>
                                 <p className="text-xs text-muted-foreground mt-3">These defaults reduce risk. They cannot make unsolicited bulk messaging safe.</p>
                             </CardContent>
                         </Card>
                     </div>
                 )}
+
+                {/* Number pre-check dialog */}
+                <Dialog open={checkOpen} onOpenChange={(o) => { if (!check?.running) setCheckOpen(o); }}>
+                    <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <ListChecks className="h-5 w-5 text-primary" /> Number check
+                            </DialogTitle>
+                        </DialogHeader>
+                        {check && (
+                            <div className="flex flex-col gap-4 min-h-0">
+                                {check.running ? (
+                                    <div className="space-y-2">
+                                        <p className="text-sm">Checking {check.total} numbers on WhatsApp… {check.done}/{check.total}</p>
+                                        <Progress value={check.total ? Math.round((check.done / check.total) * 100) : 0} className="h-2" />
+                                        <p className="text-xs text-muted-foreground">Results are cached for 24 hours, so re-checking the same list is instant. Large lists take a few minutes — this pacing is deliberate.</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {(() => {
+                                            const bad = problemRows(check);
+                                            const notOn = bad.filter(r => r.status === "not_on_whatsapp").length;
+                                            const invalid = bad.filter(r => r.status === "invalid").length;
+                                            const opted = bad.filter(r => r.status === "opted_out").length;
+                                            const ok = check.rows.length - bad.length;
+                                            return (
+                                                <>
+                                                    <div className="grid grid-cols-4 gap-2">
+                                                        <div className="rounded-lg border p-3 text-center"><div className="text-xl font-bold">{check.rows.length}</div><div className="text-[11px] text-muted-foreground">Uploaded</div></div>
+                                                        <div className="rounded-lg border p-3 text-center"><div className="text-xl font-bold text-green-600">{ok}</div><div className="text-[11px] text-muted-foreground">On WhatsApp</div></div>
+                                                        <div className="rounded-lg border p-3 text-center"><div className="text-xl font-bold text-red-500">{notOn + invalid}</div><div className="text-[11px] text-muted-foreground">Not on WhatsApp{invalid ? ` / invalid (${invalid})` : ""}</div></div>
+                                                        <div className="rounded-lg border p-3 text-center"><div className="text-xl font-bold text-slate-500">{opted}</div><div className="text-[11px] text-muted-foreground">Opted out</div></div>
+                                                    </div>
+                                                    {bad.length === 0 ? (
+                                                        <div className="flex items-center gap-2 text-sm text-green-700 bg-green-500/10 rounded-md px-3 py-2">
+                                                            <CheckCircle2 className="h-4 w-4" /> Every number is on WhatsApp. You can start the broadcast.
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <div className="flex items-start gap-2 text-xs text-yellow-700 bg-yellow-500/10 rounded-md px-3 py-2">
+                                                                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                                                                <span>You uploaded <strong>{check.rows.length}</strong> numbers; <strong>{bad.length}</strong> cannot or should not receive this message. Sending to numbers that are not on WhatsApp is one of the strongest spam signals — remove them.</span>
+                                                            </div>
+                                                            <div className="flex-1 min-h-0 overflow-y-auto rounded border max-h-56">
+                                                                <table className="w-full text-xs">
+                                                                    <thead className="bg-muted/50 text-muted-foreground sticky top-0"><tr><th className="text-left px-2 py-1 font-medium">Number</th><th className="text-left px-2 py-1 font-medium">Reason</th></tr></thead>
+                                                                    <tbody>
+                                                                        {bad.map((r, i) => (
+                                                                            <tr key={i} className="border-t">
+                                                                                <td className="px-2 py-1 font-mono">{r.number || r.input}</td>
+                                                                                <td className="px-2 py-1">
+                                                                                    {r.status === "not_on_whatsapp" ? <span className="text-red-500">Not on WhatsApp</span>
+                                                                                        : r.status === "invalid" ? <span className="text-red-500">Invalid number</span>
+                                                                                        : <span className="text-slate-500">Opted out (replied STOP)</span>}
+                                                                                </td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                            <Button variant="outline" size="sm" className="self-start" onClick={() => {
+                                                                const text = bad.map(r => `${r.number || r.input},${r.status}`).join("\n");
+                                                                navigator.clipboard?.writeText(text).then(() => toast.success("Copied to clipboard")).catch(() => {});
+                                                            }}>Copy list</Button>
+                                                        </>
+                                                    )}
+                                                    <div className="flex flex-wrap justify-end gap-2 pt-2 border-t">
+                                                        <Button variant="ghost" onClick={() => setCheckOpen(false)}>Close</Button>
+                                                        {bad.length > 0 && (
+                                                            <>
+                                                                <Button variant="outline" onClick={() => { setCheckOpen(false); handleSend({ skipPreCheck: true }); }} disabled={loading}>
+                                                                    Start anyway (engine will skip them)
+                                                                </Button>
+                                                                <Button onClick={() => { removeProblemNumbers(); }} disabled={loading}>
+                                                                    <X className="h-4 w-4 mr-1" /> Remove {bad.length} &amp; keep {ok}
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                        {bad.length === 0 && (
+                                                            <Button onClick={() => { setValidateNumbers(false); setCheckOpen(false); handleSend({ skipPreCheck: true }); }} disabled={loading}>
+                                                                <Send className="h-4 w-4 mr-1" /> Start broadcast
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            );
+                                        })()}
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </DialogContent>
+                </Dialog>
 
                 {/* Detail Modal */}
                 <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
@@ -1118,6 +1399,16 @@ export default function BroadcastPage() {
                                     <span className="text-xs font-normal uppercase tracking-wide px-2 py-0.5 rounded bg-muted">{selectedLog.status}</span>
                                 )}
                             </DialogTitle>
+                            {selectedLog && selectedLog.status !== "running" && retryableCount(selectedLog) > 0 && (
+                                <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 mt-2">
+                                    <p className="text-xs text-muted-foreground">
+                                        {retryableCount(selectedLog)} recipient(s) were not delivered for a temporary reason (connection, logout, cancel, limit). Not-on-WhatsApp and opted-out numbers are never retried.
+                                    </p>
+                                    <Button size="sm" onClick={() => handleRetry(selectedLog)} disabled={retrying || loading}>
+                                        {retrying ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-1" />} Retry failed ({retryableCount(selectedLog)})
+                                    </Button>
+                                </div>
+                            )}
                         </DialogHeader>
 
                         {detailLoading ? (

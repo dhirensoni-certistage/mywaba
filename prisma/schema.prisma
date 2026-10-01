@@ -306,6 +306,15 @@ model SystemConfig {
   faviconUrl         String?
   timezone           String   @default("Asia/Jakarta")
   enableRegistration Boolean  @default(true)
+
+  // Alerts (session logout / auto-stop, broadcast problems, daily limit nearly used)
+  alertsEnabled        Boolean @default(true)
+  alertTelegramToken   String?            // Telegram bot token
+  alertTelegramChatId  String?            // Telegram chat / group id
+  alertEmail           String?            // Comma-separated recipients (SMTP_* env must be set)
+  alertOnLogout        Boolean @default(true)
+  alertOnBroadcast     Boolean @default(true)
+  alertOnLimit         Boolean @default(true)
   
   updatedAt          DateTime @updatedAt
 }
@@ -379,6 +388,9 @@ model BroadcastLog {
   failed      Int                 @default(0)
   status      String              @default("running") // running, completed, cancelled, failed
   delay       Int                 @default(2000)
+  mediaUrl    String?             @db.Text // Kept so a failed run can be retried with the same media
+  mediaType   String?
+  options     Json?               // { batchSize, batchPauseMs, simulateTyping, shuffle, spreadHours, buttons, footer, retryOf }
   error       String?             @db.Text // Why the broadcast stopped early (logout, disconnect, cancelled...)
   startedAt   DateTime            @default(now())
   completedAt DateTime?
@@ -393,6 +405,7 @@ model BroadcastRecipient {
   id              String       @id @default(cuid())
   broadcastLogId  String
   jid             String
+  vars            Json?        // Per-recipient template variables ({name}, {city}...) so retries stay personalised
   status          String       @default("pending") // pending, sent, failed
   error           String?      @db.Text
   sentAt          DateTime?

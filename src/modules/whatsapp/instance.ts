@@ -19,6 +19,7 @@ import { bindPpGuard } from "./store/ppguard";
 import { antispam } from "./antispam";
 import { logger } from "@/lib/logger";
 import { onConnectionUpdate } from "@/lib/webhook";
+import { sendAlert } from "@/lib/alerts";
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 3000;
@@ -271,6 +272,13 @@ export class WhatsAppInstance {
                         `${reason}\n\nYou need to scan the QR code again. If this happened during a broadcast, reduce the volume, increase the delay, and only message people who expect to hear from you — repeated flags can lead to a permanent number ban.`,
                         "WARNING"
                     );
+                    sendAlert({
+                        kind: "logout",
+                        title: `Session ${this.sessionId} LOGGED OUT`,
+                        message: `${reason}\n\nScan the QR again from Sessions. If this happened during a broadcast: wait 24h, then resume at half the volume.`,
+                        href: "/dashboard/sessions",
+                        dedupeKey: `logout:${this.sessionId}`
+                    }).catch(() => {});
 
                     // Remove from memory manager
                     this.onRemovedFromManager?.();
@@ -347,6 +355,13 @@ export class WhatsAppInstance {
                         `${reason}\n\nThe session was stopped after ${MAX_RECONNECT_ATTEMPTS} failed reconnect attempts. Open Sessions and click Start to try again.`,
                         "WARNING"
                     );
+                    sendAlert({
+                        kind: "logout",
+                        title: `Session ${this.sessionId} auto-stopped`,
+                        message: `${reason}\n\nStopped after ${MAX_RECONNECT_ATTEMPTS} failed reconnect attempts. Check the phone's internet and click Start in Sessions.`,
+                        href: "/dashboard/sessions",
+                        dedupeKey: `autostop:${this.sessionId}`
+                    }).catch(() => {});
 
                     // Remove from memory manager
                     this.onRemovedFromManager?.();
