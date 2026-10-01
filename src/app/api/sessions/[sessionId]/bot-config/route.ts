@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { NextResponse, NextRequest } from "next/server";
-import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
+import { getAuthenticatedUser, canAccessSession, forbidStaff } from "@/lib/api-auth";
 
 export async function GET(
     request: NextRequest,
@@ -102,8 +102,10 @@ export async function POST(
         const safetyFields: Record<string, unknown> = {};
         if (body.dailyBroadcastLimit !== undefined) {
             const n = Number(body.dailyBroadcastLimit);
-            safetyFields.dailyBroadcastLimit = Number.isFinite(n) ? Math.max(0, Math.min(5000, Math.round(n))) : 200;
+            safetyFields.dailyBroadcastLimit = Number.isFinite(n) ? Math.max(0, Math.min(10000, Math.round(n))) : 200;
         }
+        const staffDenied = forbidStaff(user, "change bot settings");
+        if (staffDenied) return staffDenied;
         if (body.quietHoursStart !== undefined) safetyFields.quietHoursStart = toHour(body.quietHoursStart);
         if (body.quietHoursEnd !== undefined) safetyFields.quietHoursEnd = toHour(body.quietHoursEnd);
         if (body.optOutEnabled !== undefined) safetyFields.optOutEnabled = Boolean(body.optOutEnabled);

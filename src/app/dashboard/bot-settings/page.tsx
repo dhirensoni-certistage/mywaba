@@ -469,7 +469,7 @@ export default function BotSettingsPage() {
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                    <p className="text-xs text-muted-foreground">Broadcasts pause inside this window (system timezone). Recommended 10 PM – 8 AM.</p>
+                                    <p className="text-xs text-muted-foreground">Broadcasts pause inside this window (system timezone). Recommended 10 PM &ndash; 8 AM.</p>
                                 </div>
                             </div>
 

@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "./auth";
 import { logger } from "./logger";
 
@@ -78,6 +78,30 @@ export function hasRole(userRole: string, requiredRole: Role): boolean {
  */
 export function isAdmin(userRole: string): boolean {
     return userRole === "SUPERADMIN";
+}
+
+/**
+ * STAFF is an operator role: it can chat, broadcast and use day-to-day tools on the
+ * sessions shared with it, but it cannot manage sessions (create/start/stop/logout/delete),
+ * change bot/privacy settings, manage webhooks, API keys, access grants or auto-replies.
+ */
+export function isStaff(userRole: string): boolean {
+    return userRole === "STAFF";
+}
+
+/** True for OWNER and SUPERADMIN — roles allowed to configure things. */
+export function canManage(userRole: string): boolean {
+    return !isStaff(userRole);
+}
+
+/**
+ * Returns a 403 JSON response when the user is STAFF, otherwise null.
+ * Usage: `const denied = forbidStaff(user); if (denied) return denied;`
+ */
+export function forbidStaff(user: { role: string } | null | undefined, what = "perform this action") {
+    if (!user || canManage(user.role)) return null;
+    const message = `Forbidden - Staff accounts cannot ${what}. Ask the session owner.`;
+    return NextResponse.json({ status: false, message, error: message }, { status: 403 });
 }
 
 /**

@@ -10,9 +10,11 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { RefreshCw, Send, CheckCircle2, XCircle, Radio, Clock, AlertTriangle, History, Eye, Calendar, Ban, ShieldCheck, Info, Shuffle, Gauge, MoonStar, UserX, BookOpen } from "lucide-react";
+import { RefreshCw, Send, CheckCircle2, XCircle, Radio, Clock, AlertTriangle, History, Eye, Calendar, Ban, ShieldCheck, Info, Gauge, MoonStar, UserX, BookOpen, FileSpreadsheet, Upload, X, Plus, Smartphone, Timer, MousePointerClick } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/components/dashboard/session-provider";
+import { useSession as useAuthSession } from "next-auth/react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SessionGuard } from "@/components/dashboard/session-guard";
 import { useSocket } from "@/components/chat/socket-context";
 import { MediaUploadInput } from "@/components/dashboard/media-upload-input";
@@ -21,6 +23,7 @@ type BroadcastStatus = "running" | "completed" | "cancelled" | "failed";
 
 interface BroadcastProgress {
     broadcastId: string;
+    sessionId?: string;
     status: BroadcastStatus;
     total: number;
     sent: number;
@@ -33,6 +36,23 @@ interface BroadcastProgress {
     errors?: { jid: string; error: string }[];
     startedAt?: string;
     completedAt?: string;
+}
+
+interface UploadedList {
+    fileName: string;
+    columns: string[];
+    numberColumn: string;
+    nameColumn: string | null;
+    rows: { number: string; name: string | null; vars: Record<string, string> }[];
+    invalid: string[];
+    truncated: number;
+}
+
+interface ButtonDraft {
+    type: "reply" | "url" | "call";
+    text: string;
+    url: string;
+    phone: string;
 }
 
 interface BroadcastHealth {
@@ -85,8 +105,18 @@ interface BroadcastRecipient {
 }
 
 export default function BroadcastPage() {
-    const { sessionId } = useSession();
+    const { sessionId, sessions } = useSession();
+    const { data: authSession } = useAuthSession();
+    const canEditLimit = (authSession?.user as any)?.role !== "STAFF";
     const [contacts, setContacts] = useState("");
+    const [uploaded, setUploaded] = useState<UploadedList | null>(null);
+    const [uploading, setUploading] = useState(false);
+    const [spreadHours, setSpreadHours] = useState(0);
+    const [extraSessions, setExtraSessions] = useState<string[]>([]);
+    const [buttons, setButtons] = useState<ButtonDraft[]>([]);
+    const [footer, setFooter] = useState("");
+    const [limitDraft, setLimitDraft] = useState<string>("");
+    const [savingLimit, setSavingLimit] = useState(false);
     const [message, setMessage] = useState("");
     const [mediaUrl, setMediaUrl] = useState("");
     const [mediaType, setMediaType] = useState("image");
@@ -97,7 +127,7 @@ export default function BroadcastPage() {
     const [validateNumbers, setValidateNumbers] = useState(true);
     const [loading, setLoading] = useState(false);
     const [cancelling, setCancelling] = useState(false);
-    const [broadcastProgress, setBroadcastProgress] = useState<BroadcastProgress | null>(null);
+    const [progressMap, setProgressMap] = useState<Record<string, BroadcastProgress>>({});
     const [activeTab, setActiveTab] = useState<"new" | "history" | "guide">("new");
     const [shuffle, setShuffle] = useState(true);
     const [health, setHealth] = useState<BroadcastHealth | null>(null);
@@ -121,10 +151,8 @@ export default function BroadcastPage() {
         socket.on("connect", onConnect);
 
         const handler = (data: BroadcastProgress) => {
-            setBroadcastProgress(prev => ({ ...(prev && prev.broadcastId === data.broadcastId ? prev : {}), ...data }));
+            setProgressMap(prev => ({ ...prev, [data.broadcastId]: { ...(prev[data.broadcastId] || {}), ...data } }));
             if (data.status !== "running") {
-                setLoading(false);
-                setCancelling(false);
                 // Refresh history after completion
                 fetchHistory();
                 if (data.status === "completed") {
@@ -183,9 +211,85 @@ export default function BroadcastPage() {
         }
     }, [sessionId]);
 
+    const runs = Object.values(progressMap);
+    const anyRunning = runs.some(p => p.status === "running");
+    useEffect(() => {
+        if (runs.length > 0 && !anyRunning) {
+            setLoading(false);
+            setCancelling(false);
+        }
+    }, [runs.length, anyRunning]);
+
     useEffect(() => {
         fetchHealth();
-    }, [fetchHealth, broadcastProgress?.status]);
+    }, [fetchHealth, anyRunning]);
+
+    useEffect(() => {
+        if (health && limitDraft === "") setLimitDraft(String(health.dailyLimit));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [health?.dailyLimit]);
+
+    const saveLimit = async () => {
+        if (!sessionId) return;
+        const n = Math.max(0, Math.min(10000, parseInt(limitDraft) || 0));
+        setSavingLimit(true);
+        try {
+            const res = await fetch(`/api/sessions/${sessionId}/bot-config`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ dailyBroadcastLimit: n })
+            });
+            if (res.ok) {
+                toast.success(n === 0 ? "Daily limit disabled" : `Daily limit set to ${n}`);
+                setLimitDraft(String(n));
+                fetchHealth();
+            } else {
+                const d = await res.json().catch(() => ({}));
+                toast.error(d.message || "Failed to update limit");
+            }
+        } catch {
+            toast.error("Failed to update limit");
+        } finally {
+            setSavingLimit(false);
+        }
+    };
+
+    // Excel / CSV upload → parsed recipients with per-row variables
+    const handleFileUpload = async (file: File | null) => {
+        if (!file || !sessionId) return;
+        setUploading(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            const res = await fetch(`/api/messages/${sessionId}/broadcast/recipients/parse`, { method: "POST", body: fd });
+            const data = await res.json();
+            if (!res.ok || !data.status) {
+                toast.error(data.message || "Could not read the file");
+                return;
+            }
+            const d = data.data;
+            setUploaded({ fileName: file.name, columns: d.columns, numberColumn: d.numberColumn, nameColumn: d.nameColumn, rows: d.rows, invalid: d.invalid || [], truncated: d.truncated || 0 });
+            setContacts("");
+            toast.success(`${d.rows.length} recipients loaded from ${file.name}${d.invalid?.length ? ` (${d.invalid.length} invalid skipped)` : ""}`);
+        } catch (e) {
+            console.error(e);
+            toast.error("Could not read the file");
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const otherConnectedSessions = sessions.filter(s => s.sessionId !== sessionId && s.status === "CONNECTED");
+    const toggleExtraSession = (id: string) =>
+        setExtraSessions(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+    const addButton = () => {
+        if (buttons.length >= 3) return;
+        setButtons(prev => [...prev, { type: "reply", text: "", url: "", phone: "" }]);
+    };
+    const updateButton = (i: number, patch: Partial<ButtonDraft>) =>
+        setButtons(prev => prev.map((b, idx) => idx === i ? { ...b, ...patch } : b));
+    const removeButton = (i: number) => setButtons(prev => prev.filter((_, idx) => idx !== i));
 
     // Open detail modal
     const openDetail = async (log: BroadcastLog) => {
@@ -209,10 +313,12 @@ export default function BroadcastPage() {
         if (!sessionId) return toast.error("No active session found");
         if (!message.trim() && !mediaUrl.trim()) return toast.error("Message or media cannot be empty");
         setLoading(true);
-        setBroadcastProgress(null);
+        setProgressMap({});
 
         try {
-            const recipients = contacts.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+            const recipients: (string | { number: string; name: string | null; vars: Record<string, string> })[] = uploaded
+                ? uploaded.rows.map(r => ({ number: r.number, name: r.name, vars: r.vars }))
+                : contacts.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
 
             if (recipients.length === 0) {
                 toast.error("No recipients specified");
@@ -220,11 +326,16 @@ export default function BroadcastPage() {
                 return;
             }
 
-            if (recipients.length > LIMITS.MAX_RECIPIENTS) {
-                toast.error(`Maximum ${LIMITS.MAX_RECIPIENTS} recipients per broadcast. Split the list and spread it over the day.`);
+            const numberCount = 1 + extraSessions.length;
+            if (recipients.length > LIMITS.MAX_RECIPIENTS * numberCount) {
+                toast.error(`Maximum ${LIMITS.MAX_RECIPIENTS} recipients per number per broadcast (${LIMITS.MAX_RECIPIENTS * numberCount} with ${numberCount} numbers). Split the list or add more connected numbers.`);
                 setLoading(false);
                 return;
             }
+
+            const cleanButtons = buttons
+                .map(b => ({ type: b.type, text: b.text.trim(), url: b.url.trim() || undefined, phone: b.phone.trim() || undefined }))
+                .filter(b => b.text && (b.type !== "url" || b.url) && (b.type !== "call" || b.phone));
 
             const res = await fetch(`/api/messages/${sessionId}/broadcast`, {
                 method: "POST",
@@ -239,7 +350,11 @@ export default function BroadcastPage() {
                     batchPauseMs: batchPauseSec * 1000,
                     simulateTyping,
                     validateNumbers,
-                    shuffle
+                    shuffle,
+                    spreadHours: spreadHours > 0 ? spreadHours : undefined,
+                    sessionIds: extraSessions.length > 0 ? extraSessions : undefined,
+                    buttons: cleanButtons.length > 0 ? cleanButtons : undefined,
+                    footer: cleanButtons.length > 0 && footer.trim() ? footer.trim() : undefined
                 })
             });
 
@@ -247,7 +362,14 @@ export default function BroadcastPage() {
 
             if (res.ok) {
                 const invalid: string[] = data?.data?.invalidRecipients || [];
-                toast.info(`Broadcast started for ${data?.data?.total ?? recipients.length} recipients...`);
+                const runsStarted: { sessionId: string }[] = data?.data?.broadcasts || [];
+                toast.info(`Broadcast started for ${data?.data?.total ?? recipients.length} recipients${runsStarted.length > 1 ? ` across ${runsStarted.length} numbers` : ""}...`);
+                const rejected: { sessionId: string; reason: string }[] = data?.data?.rejectedSessions || [];
+                if (rejected.length > 0) {
+                    toast.warning(`Not used: ${rejected.map(r => `${r.sessionId} (${r.reason})`).join(", ")}`);
+                }
+                const failures: { sessionId: string; error: string }[] = data?.data?.failures || [];
+                for (const f of failures) toast.error(`${f.sessionId}: ${f.error}`);
                 if (invalid.length > 0) {
                     toast.warning(`${invalid.length} entr${invalid.length === 1 ? "y was" : "ies were"} ignored as invalid numbers: ${invalid.slice(0, 3).join(", ")}${invalid.length > 3 ? "…" : ""}`);
                 }
@@ -262,12 +384,18 @@ export default function BroadcastPage() {
         }
     };
 
-    const handleCancel = async (broadcastId?: string) => {
-        const id = broadcastId || broadcastProgress?.broadcastId;
-        if (!sessionId || !id) return;
+    const handleCancel = async (broadcastId?: string, runSessionId?: string) => {
+        const targets = broadcastId
+            ? [{ id: broadcastId, sid: runSessionId || sessionId }]
+            : Object.values(progressMap).filter(p => p.status === "running").map(p => ({ id: p.broadcastId, sid: p.sessionId || sessionId }));
+        if (!sessionId || targets.length === 0) return;
         setCancelling(true);
+        for (const t of targets) await cancelOne(t.id, t.sid);
+    };
+
+    const cancelOne = async (id: string, sid: string) => {
         try {
-            const res = await fetch(`/api/messages/${sessionId}/broadcast/${id}/cancel`, { method: "POST" });
+            const res = await fetch(`/api/messages/${sid}/broadcast/${id}/cancel`, { method: "POST" });
             const data = await res.json();
             if (res.ok) {
                 toast.info(data.message || "Cancellation requested");
@@ -283,15 +411,19 @@ export default function BroadcastPage() {
         }
     };
 
-    const recipientCount = new Set(contacts.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean)).size;
+    const recipientCount = uploaded ? uploaded.rows.length : new Set(contacts.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean)).size;
+    const numberCount = 1 + extraSessions.length;
+    const perNumber = Math.ceil(recipientCount / numberCount);
 
-    // Rough runtime estimate: avg jitter is +30%, plus one cooldown per full batch.
+    // Rough runtime estimate: avg jitter is +30%, plus one cooldown per full batch. Numbers run in parallel.
     const estimateSeconds = (() => {
         if (recipientCount === 0) return 0;
+        if (spreadHours > 0) return Math.round(spreadHours * 3600);
         const perMessage = delay[0] * 1.3 / 1000 + (simulateTyping ? 2.5 : 0);
-        const batches = Math.max(0, Math.ceil(recipientCount / Math.max(batchSize, 1)) - 1);
-        return Math.round(recipientCount * perMessage + batches * batchPauseSec * 1.25);
+        const batches = Math.max(0, Math.ceil(perNumber / Math.max(batchSize, 1)) - 1);
+        return Math.round(perNumber * perMessage + batches * batchPauseSec * 1.25);
     })();
+    const spreadGapSec = spreadHours > 0 && perNumber > 1 ? Math.max(LIMITS.MIN_DELAY_MS / 1000, Math.round((spreadHours * 3600) / (perNumber - 1))) : 0;
     const formatDuration = (sec: number) => {
         if (sec < 60) return `${sec}s`;
         const m = Math.floor(sec / 60);
@@ -361,20 +493,109 @@ export default function BroadcastPage() {
                             <Card>
                                 <CardHeader>
                                     <CardTitle>Recipients</CardTitle>
-                                    <CardDescription>Enter phone numbers separated by comma or new line.</CardDescription>
+                                    <CardDescription>Paste numbers, or upload an Excel / CSV with a number column and any extra columns (name, city, order…) to personalise each message.</CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
+                                    {/* File upload */}
                                     <div className="space-y-2">
-                                        <Label>Target Numbers (e.g., 919876543210)</Label>
-                                        <Textarea
-                                            placeholder={"919876543210\n919876543211"}
-                                            className="min-h-[200px] font-mono text-sm"
-                                            value={contacts}
-                                            onChange={e => setContacts(e.target.value)}
-                                            disabled={loading}
-                                        />
-                                        <p className="text-xs text-muted-foreground">{recipientCount} numbers identified</p>
+                                        <div className="flex items-center justify-between">
+                                            <Label className="flex items-center gap-1.5"><FileSpreadsheet className="h-4 w-4" /> Upload Excel / CSV</Label>
+                                            <a
+                                                href={`data:text/csv;charset=utf-8,${encodeURIComponent("phone,name,city\n919876543210,Dhiren,Mumbai\n919876543211,Asha,Pune\n")}`}
+                                                download="broadcast-template.csv"
+                                                className="text-[11px] text-primary underline underline-offset-2"
+                                            >Download template</a>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <Input
+                                                type="file"
+                                                accept=".xlsx,.xls,.csv,.txt"
+                                                disabled={loading || uploading}
+                                                onChange={e => { handleFileUpload(e.target.files?.[0] || null); e.target.value = ""; }}
+                                                className="text-xs"
+                                            />
+                                            {uploading && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            Header row needed: a column named <code className="bg-muted px-1 rounded">phone</code> / <code className="bg-muted px-1 rounded">number</code> / <code className="bg-muted px-1 rounded">mobile</code> (with country code, e.g. 919876543210) and optionally <code className="bg-muted px-1 rounded">name</code>. Every column becomes a placeholder.
+                                        </p>
                                     </div>
+
+                                    {uploaded ? (
+                                        <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-medium truncate flex items-center gap-1.5"><Upload className="h-3.5 w-3.5 text-green-600" /> {uploaded.fileName}</p>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {uploaded.rows.length} recipients · number column <code className="bg-muted px-1 rounded">{uploaded.numberColumn}</code>
+                                                        {uploaded.nameColumn ? <> · name column <code className="bg-muted px-1 rounded">{uploaded.nameColumn}</code></> : " · no name column"}
+                                                        {uploaded.invalid.length > 0 && <span className="text-red-500"> · {uploaded.invalid.length} invalid skipped</span>}
+                                                        {uploaded.truncated > 0 && <span className="text-red-500"> · {uploaded.truncated} rows beyond the 5000 limit ignored</span>}
+                                                    </p>
+                                                </div>
+                                                <Button variant="ghost" size="sm" onClick={() => setUploaded(null)} disabled={loading}><X className="h-4 w-4" /></Button>
+                                            </div>
+                                            <div className="flex flex-wrap gap-1">
+                                                {uploaded.columns.map(c => (
+                                                    <button key={c} type="button" className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20"
+                                                        title="Insert placeholder into message"
+                                                        onClick={() => setMessage(m => `${m}{${c}}`)}>
+                                                        {`{${c}}`}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <div className="max-h-36 overflow-auto rounded border bg-background">
+                                                <table className="w-full text-[11px]">
+                                                    <thead className="bg-muted/50 text-muted-foreground">
+                                                        <tr><th className="text-left px-2 py-1 font-medium">Number</th><th className="text-left px-2 py-1 font-medium">Name</th>{uploaded.columns.filter(c => c !== uploaded.numberColumn && c !== uploaded.nameColumn).slice(0, 3).map(c => <th key={c} className="text-left px-2 py-1 font-medium">{c}</th>)}</tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {uploaded.rows.slice(0, 5).map((r, i) => (
+                                                            <tr key={i} className="border-t">
+                                                                <td className="px-2 py-1 font-mono">{r.number}</td>
+                                                                <td className="px-2 py-1">{r.name || <span className="text-muted-foreground">—</span>}</td>
+                                                                {uploaded.columns.filter(c => c !== uploaded.numberColumn && c !== uploaded.nameColumn).slice(0, 3).map(c => <td key={c} className="px-2 py-1 truncate max-w-[120px]">{r.vars[c]}</td>)}
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <Label>Or paste numbers (e.g., 919876543210)</Label>
+                                            <Textarea
+                                                placeholder={"919876543210\n919876543211"}
+                                                className="min-h-[140px] font-mono text-sm"
+                                                value={contacts}
+                                                onChange={e => setContacts(e.target.value)}
+                                                disabled={loading}
+                                            />
+                                            <p className="text-xs text-muted-foreground">{recipientCount} numbers identified</p>
+                                        </div>
+                                    )}
+
+                                    {/* Multi-number rotation */}
+                                    {otherConnectedSessions.length > 0 && (
+                                        <div className="space-y-2 rounded-lg border p-3">
+                                            <Label className="flex items-center gap-1.5"><Smartphone className="h-4 w-4" /> Also send from other connected numbers</Label>
+                                            <p className="text-[11px] text-muted-foreground">The list is split evenly across the selected numbers and sent in parallel. Each number keeps its own daily limit — this is the safe way to send more per day.</p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {otherConnectedSessions.map(s => {
+                                                    const on = extraSessions.includes(s.sessionId);
+                                                    return (
+                                                        <button key={s.sessionId} type="button" disabled={loading} onClick={() => toggleExtraSession(s.sessionId)}
+                                                            className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${on ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"}`}>
+                                                            {on ? "✓ " : ""}{s.name} <span className="font-mono opacity-70">({s.sessionId})</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            {extraSessions.length > 0 && (
+                                                <p className="text-[11px] text-muted-foreground">≈ {perNumber} recipients per number across {numberCount} numbers.</p>
+                                            )}
+                                        </div>
+                                    )}
                                 </CardContent>
                             </Card>
 
@@ -411,8 +632,38 @@ export default function BroadcastPage() {
                                         />
                                     </div>
 
+                                    {/* Interactive buttons (BETA) */}
+                                    <div className="space-y-2 rounded-lg border border-dashed p-3">
+                                        <div className="flex items-center justify-between">
+                                            <Label className="text-xs flex items-center gap-1.5"><MousePointerClick className="h-3.5 w-3.5" /> Buttons <span className="px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-700 text-[10px] font-semibold">BETA</span></Label>
+                                            <Button type="button" variant="outline" size="sm" onClick={addButton} disabled={loading || buttons.length >= 3}><Plus className="h-3.5 w-3.5 mr-1" /> Add</Button>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground">Quick-reply, website or call buttons (max 3). WhatsApp only officially supports buttons on the Business API; from a linked device they show on most Android phones and often not on iPhone / Web. If WhatsApp rejects them, the run continues as plain text.</p>
+                                        {buttons.map((b, i) => (
+                                            <div key={i} className="grid grid-cols-[110px_1fr_auto] gap-2 items-center">
+                                                <Select value={b.type} onValueChange={(v: string) => updateButton(i, { type: v as ButtonDraft["type"] })}>
+                                                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="reply">Quick reply</SelectItem>
+                                                        <SelectItem value="url">Open link</SelectItem>
+                                                        <SelectItem value="call">Call</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                <div className="flex gap-2">
+                                                    <Input className="h-8 text-xs" placeholder="Button text (max 25)" maxLength={25} value={b.text} onChange={e => updateButton(i, { text: e.target.value })} disabled={loading} />
+                                                    {b.type === "url" && <Input className="h-8 text-xs" placeholder="https://…" value={b.url} onChange={e => updateButton(i, { url: e.target.value })} disabled={loading} />}
+                                                    {b.type === "call" && <Input className="h-8 text-xs" placeholder="+919876543210" value={b.phone} onChange={e => updateButton(i, { phone: e.target.value })} disabled={loading} />}
+                                                </div>
+                                                <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => removeButton(i)} disabled={loading}><X className="h-3.5 w-3.5" /></Button>
+                                            </div>
+                                        ))}
+                                        {buttons.length > 0 && (
+                                            <Input className="h-8 text-xs" placeholder="Footer line (optional, max 60)" maxLength={60} value={footer} onChange={e => setFooter(e.target.value)} disabled={loading} />
+                                        )}
+                                    </div>
+
                                     <div className="space-y-4 pt-2">
-                                        <div className="space-y-2">
+                                        <div className={`space-y-2 ${spreadHours > 0 ? "opacity-50 pointer-events-none" : ""}`}>
                                             <Label>Delay between messages: {(delay[0] / 1000).toFixed(0)}s</Label>
                                             <Slider
                                                 min={LIMITS.MIN_DELAY_MS}
@@ -427,7 +678,20 @@ export default function BroadcastPage() {
                                             </p>
                                         </div>
 
-                                        <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1.5 rounded-lg border p-3 bg-muted/20">
+                                            <Label className="text-xs flex items-center gap-1.5"><Timer className="h-3.5 w-3.5" /> Spread evenly over (hours) — 0 = use delay &amp; batches below</Label>
+                                            <div className="flex items-center gap-2">
+                                                <Input type="number" min={0} max={72} step={0.5} value={spreadHours}
+                                                    onChange={e => setSpreadHours(Math.max(0, Math.min(72, parseFloat(e.target.value) || 0)))}
+                                                    disabled={loading} className="w-28" />
+                                                {spreadHours > 0 && perNumber > 1 && (
+                                                    <span className="text-xs text-muted-foreground">≈ one message every {spreadGapSec >= 60 ? `${Math.round(spreadGapSec / 60)} min` : `${spreadGapSec}s`} per number</span>
+                                                )}
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground">Best for big lists: e.g. 500 recipients over 10 hours looks like a person chatting all day, not a blast.</p>
+                                        </div>
+
+                                        <div className={`grid grid-cols-2 gap-3 ${spreadHours > 0 ? "opacity-50 pointer-events-none" : ""}`}>
                                             <div className="space-y-1.5">
                                                 <Label className="text-xs">Messages per batch</Label>
                                                 <Input
@@ -476,17 +740,17 @@ export default function BroadcastPage() {
                                             </div>
                                         </div>
 
-                                        {health && health.dailyLimit > 0 && health.remaining !== null && recipientCount > health.remaining && (
+                                        {health && health.dailyLimit > 0 && health.remaining !== null && perNumber > health.remaining && (
                                             <div className="flex items-start gap-2 text-xs text-red-600 bg-red-500/10 rounded-md px-3 py-2">
                                                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                                                <span>Only {health.remaining} of today&apos;s limit ({health.dailyLimit}) remain. Reduce the list to {health.remaining} or less, or change the limit in Bot Settings → Broadcast Safety.</span>
+                                                <span>This number has {health.remaining} of its daily limit ({health.dailyLimit}) left but would get {perNumber} recipients. Reduce the list, add more connected numbers, or raise the limit in Number Health below.</span>
                                             </div>
                                         )}
 
                                         {recipientCount > 0 && (
                                             <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                                                 <Clock className="h-3.5 w-3.5" />
-                                                Estimated time for {recipientCount} recipients: ~{formatDuration(estimateSeconds)}
+                                                Estimated time for {recipientCount} recipients{numberCount > 1 ? ` on ${numberCount} numbers` : ""}: ~{formatDuration(estimateSeconds)}
                                             </p>
                                         )}
 
@@ -521,11 +785,21 @@ export default function BroadcastPage() {
                                             </span>
                                         </div>
                                         <Progress value={health.dailyLimit > 0 ? budgetPct : 0} className="h-2" />
-                                        <p className="text-[11px] text-muted-foreground mt-1">
-                                            {health.dailyLimit > 0
-                                                ? `${health.remaining ?? 0} remaining today`
-                                                : "Set a daily limit to protect this number"}
-                                        </p>
+                                        <div className="flex items-center justify-between gap-2 mt-1">
+                                            <p className="text-[11px] text-muted-foreground">
+                                                {health.dailyLimit > 0
+                                                    ? `${health.remaining ?? 0} remaining today`
+                                                    : "No daily limit — not recommended"}
+                                            </p>
+                                            {canEditLimit && (
+                                                <div className="flex items-center gap-1">
+                                                    <Input type="number" min={0} max={10000} value={limitDraft} onChange={e => setLimitDraft(e.target.value)} className="h-7 w-20 text-xs" title="Daily limit (0 = off)" />
+                                                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={saveLimit} disabled={savingLimit || String(health.dailyLimit) === limitDraft}>
+                                                        {savingLimit ? <RefreshCw className="h-3 w-3 animate-spin" /> : "Set"}
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                     <div className="rounded-lg border p-3">
                                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><MoonStar className="h-3.5 w-3.5" /> Quiet hours</div>
@@ -563,9 +837,16 @@ export default function BroadcastPage() {
                             </CardContent>
                         </Card>
 
-                        {/* Live Progress */}
-                        {broadcastProgress && (
-                            <Card className={`border-2 transition-colors ${
+                        {/* Live Progress — one card per number */}
+                        {runs.length > 1 && anyRunning && (
+                            <div className="flex justify-end">
+                                <Button variant="destructive" size="sm" onClick={() => handleCancel()} disabled={cancelling}>
+                                    <Ban className="h-4 w-4 mr-1" /> Stop all
+                                </Button>
+                            </div>
+                        )}
+                        {runs.map(broadcastProgress => (
+                            <Card key={broadcastProgress.broadcastId} className={`border-2 transition-colors ${
                                 broadcastProgress.status === "completed"
                                     ? (broadcastProgress.failed === 0 ? "border-green-500/30 bg-green-50/30 dark:bg-green-950/10" : "border-yellow-500/30 bg-yellow-50/30 dark:bg-yellow-950/10")
                                     : broadcastProgress.status === "failed"
@@ -590,10 +871,10 @@ export default function BroadcastPage() {
                                                     <><AlertTriangle className="h-5 w-5 text-yellow-500" /><span>Broadcast Completed with Errors</span></>
                                                 )}
                                             </CardTitle>
-                                            <CardDescription>ID: {broadcastProgress.broadcastId}</CardDescription>
+                                            <CardDescription>ID: {broadcastProgress.broadcastId}{broadcastProgress.sessionId && broadcastProgress.sessionId !== sessionId ? ` · number ${broadcastProgress.sessionId}` : ""}</CardDescription>
                                         </div>
                                         {broadcastProgress.status === "running" && (
-                                            <Button variant="destructive" size="sm" onClick={() => handleCancel()} disabled={cancelling}>
+                                            <Button variant="destructive" size="sm" onClick={() => handleCancel(broadcastProgress.broadcastId, broadcastProgress.sessionId)} disabled={cancelling}>
                                                 {cancelling ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <Ban className="h-4 w-4 mr-1" />}
                                                 {cancelling ? "Stopping…" : "Stop"}
                                             </Button>
@@ -671,7 +952,7 @@ export default function BroadcastPage() {
                                     )}
                                 </CardContent>
                             </Card>
-                        )}
+                        ))}
                     </>
                 )}
 
@@ -725,7 +1006,7 @@ export default function BroadcastPage() {
 
                                             {/* Actions */}
                                             {log.status === "running" && (
-                                                <Button variant="ghost" size="sm" className="shrink-0 text-red-500" onClick={() => handleCancel(log.id)}>
+                                                <Button variant="ghost" size="sm" className="shrink-0 text-red-500" onClick={() => handleCancel(log.id, log.sessionId)}>
                                                     <Ban className="h-4 w-4 mr-1" /> Stop
                                                 </Button>
                                             )}

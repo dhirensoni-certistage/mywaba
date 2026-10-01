@@ -31,6 +31,46 @@ These defaults reduce risk; they cannot make unsolicited bulk messaging safe.
 
 The same guide is available inside the dashboard: **Broadcast → Safety Guide** tab (visible to every role, including staff).
 
+## Sending more without raising the risk per number
+
+The daily limit is **per WhatsApp number**, and it is adjustable (Bot Settings → Broadcast Safety, or the
+"Set" box in Number Health; `0` disables it). Raising it on a single number raises the ban risk on that
+number. The approaches that scale safely are:
+
+| Approach | Where | Effect |
+|---|---|---|
+| **Spread evenly over N hours** | Broadcast → "Spread evenly over (hours)" | 500 recipients over 10 hours = one message every ~70 s, which reads like a person chatting all day. Replaces the batch rhythm. |
+| **Send from several numbers** | Broadcast → "Also send from other connected numbers" | The list is split round-robin across the selected connected sessions and sent in parallel. Each number keeps its own daily limit and history. 4 warmed-up numbers × 200 = 800/day. |
+| **Personalise every message** | `{name}`, `{city}`, `{a|b}` | Different texts per recipient; identical texts are the strongest content signal. |
+| **Only warm audiences** | your list | Recipients who have replied before carry far less weight than cold numbers. |
+
+Do not: shorten the minimum delay (it is 3 s on purpose), run the same list from the same number twice
+a day, or use freshly bought SIMs for volume — they are flagged within hours.
+
+## Excel / CSV upload
+
+Upload a `.xlsx` or `.csv` on the Broadcast page. The first row must be a header. Required: a column
+named `phone`, `number`, `mobile`, `whatsapp` or `contact` with the full international number
+(`919876543210`). Optional: `name`. **Every column becomes a placeholder**: a column `city` can be used
+as `{city}` or `{city|your area}` in the message or caption. Numbers not on WhatsApp are still validated
+and skipped at send time. Max 5000 rows per file, 500 recipients per number per run.
+
+## Buttons (BETA)
+
+Quick-reply, link and call buttons (max 3) can be attached on the Broadcast page. WhatsApp supports
+buttons officially only on the Business Platform API. From a linked device they are delivered as an
+"interactive message": most Android phones render them, iPhone and WhatsApp Web often show only the
+text. If WhatsApp rejects the interactive message the run automatically continues as plain text.
+Messages sent with buttons do not appear in the dashboard Chat view (they bypass the normal send path)
+but are tracked in Broadcast History.
+
+## Roles
+
+**STAFF** accounts can chat, broadcast and use the day-to-day tools on sessions shared with them, and
+they see this guide in the dashboard. They cannot create/start/stop/log out/delete sessions, change bot
+or privacy settings, manage webhooks, auto-replies, access grants or API keys. Those are OWNER /
+SUPERADMIN actions and the API refuses them with 403.
+
 ## Volume guidance (conservative, from community experience)
 
 | Number age | Cold recipients / day | Notes |

@@ -11,12 +11,19 @@
 - **Stale session selection across accounts**: The `sessionId` cookie is cleared when it points to a session the current user cannot access.
 
 ### Added
+- **Excel / CSV recipient upload** (`POST /api/messages/{sessionId}/broadcast/recipients/parse`, exceljs): header-based detection of the number and name columns, preview in the dashboard, every column available as a `{column}` / `{column|fallback}` placeholder in the message or caption. Broadcast recipients may now be objects `{ number, name, vars }`.
+- **Spread evenly over N hours**: even pacing for big lists (overrides delay/batch settings; never below the 3 s minimum).
+- **Multi-number rotation**: `sessionIds[]` splits the list round-robin across other connected sessions the user can access; one run per number with its own daily limit, progress card and Stop button ("Stop all" for the group).
+- **Interactive buttons (BETA)**: up to 3 quick-reply / URL / call buttons via a raw `interactiveMessage` (`src/modules/whatsapp/interactive.ts`); automatic fallback to plain text if WhatsApp rejects it.
+- **Quick daily-limit edit** in the Number Health card (OWNER/SUPERADMIN), limit cap raised to 10000 (0 = off).
+- **STAFF role restrictions**: staff can chat/broadcast/use tools on shared sessions but get 403 on session management (create/start/stop/restart/logout/pair/delete/settings), bot config, webhooks (incl. logs/test), auto-replies, profile changes, access grants and API keys. Management entries are hidden from the sidebar for STAFF.
 - **Broadcast Safety settings** (Bot Settings → Broadcast Safety, new `BotConfig` columns): per-session **daily broadcast limit** (rolling 24h, default 200; a run that would exceed it is refused up front and stopped mid-run if other sends consume the budget), **quiet hours** (sends pause inside the window, system timezone) and **opt-out handling** (contacts who reply STOP / UNSUBSCRIBE / STOP ALL / CANCEL are flagged via `Contact.optedOut` and skipped by every future broadcast, with an optional confirmation reply).
 - **Personalisation & spintax** in broadcast text/captions: `{name}`, `{name|fallback}` and `{option a|option b}` so no two messages are identical. Recipients are sent in random order by default.
 - **Number Health card** on the Broadcast page: sent in last 24h vs limit, quiet-hours state, opted-out count, last disconnect reason. `GET /api/messages/{sessionId}/broadcast` now returns limits + health.
 - **Safety Guide tab** on the Broadcast page, visible to every role including staff, with the ban-avoidance guidance from `docs/BROADCAST_SAFETY.md`.
 
 ### Changed
+- **Baileys upgraded `7.0.0-rc.9` → `7.0.0-rc14`** (rc.9 is deprecated on npm for GHSA-qvv5-jq5g-4cgg, message spoofing). The newsletter/channel media patch was re-based: `patches/@whiskeysockets+baileys+7.0.0-rc14.patch` keeps the newsletter upload endpoint (`/newsletter/newsletter-*`, `server_thumb_gen`), the `/o1/`→`/m1/` directPath fix and the unencrypted-media download fallback; the `mediatype` attribute part is upstream now. `package-lock.json` is in sync with the pin.
 - **Broadcast engine rewritten for number safety** (`src/modules/whatsapp/broadcast.ts`):
   - recipients are de-duplicated and verified with `onWhatsApp()` first; unregistered numbers are skipped instead of sent
   - minimum delay 3s, default 8s (was 2s), random jitter up to +60%

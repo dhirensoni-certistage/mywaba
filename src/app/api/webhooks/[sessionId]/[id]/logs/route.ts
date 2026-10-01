@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
+import { getAuthenticatedUser, canAccessSession, forbidStaff } from "@/lib/api-auth";
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ sessionId: string; id: string }> }
@@ -9,6 +9,8 @@ export async function GET(
     if (!user) {
         return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
     }
+    const staffDenied = forbidStaff(user, "view webhook logs");
+    if (staffDenied) return staffDenied;
 
     const { sessionId, id } = await params;
     const { searchParams } = new URL(request.url);

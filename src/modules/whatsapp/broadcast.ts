@@ -4,8 +4,9 @@ import { waManager } from "./manager";
 import type { AnyMessageContent } from "@whiskeysockets/baileys";
 import {
     loadSafetyConfig, countSentLast24h, getSystemTimezone, currentHourInTz, isInQuietHours, formatHour,
-    loadContactsForJids, personalize, hasPersonalization, type SafetyConfig
+    loadContactsForJids, personalize, hasPersonalization, type SafetyConfig, type TemplateVars
 } from "./safety";
+import { sendInteractiveMessage, sanitizeButtons, type BroadcastButton } from "./interactive";
 
 /**
  * Broadcast engine — anti-ban aware bulk sender.
@@ -56,9 +57,17 @@ export const BROADCAST_LIMITS = {
 
 export type BroadcastStatus = "running" | "completed" | "cancelled" | "failed";
 
+/** A recipient is a bare number/JID or an object carrying per-recipient template variables. */
+export type RecipientInput = string | { number?: string; jid?: string; phone?: string; name?: string | null; vars?: TemplateVars | null; [extra: string]: unknown };
+
+export interface PreparedRecipient {
+    jid: string;
+    vars: TemplateVars;
+}
+
 export interface BroadcastOptions {
     sessionId: string;
-    recipients: string[];
+    recipients: RecipientInput[];
     message: string;
     mediaUrl?: string | null;
     mediaType?: string | null;
@@ -74,6 +83,15 @@ export interface BroadcastOptions {
     validateNumbers?: boolean;
     /** Send in random order instead of list order. Default true. */
     shuffle?: boolean;
+    /**
+     * Spread the whole run evenly over this many hours. Overrides `delay`, `batchSize` and
+     * `batchPauseMs`: the per-message gap becomes hours*3600/recipients (never below the minimum).
+     */
+    spreadHours?: number;
+    /** Up to 3 interactive buttons (BETA — see interactive.ts). Validated with sanitizeButtons(). */
+    buttons?: Array<{ type?: string; text: string; url?: string; phone?: string }> | BroadcastButton[];
+    /** Optional footer line under the button message. */
+    footer?: string;
 }
 
 export interface BroadcastHealth {
@@ -117,6 +135,7 @@ export async function getBroadcastHealth(sessionId: string): Promise<BroadcastHe
 
 export interface BroadcastProgressPayload {
     broadcastId: string;
+    sessionId?: string;
     status: BroadcastStatus;
     total: number;
     sent: number;
@@ -152,19 +171,39 @@ export function normalizeRecipient(raw: string): string | null {
     return `${digits}@s.whatsapp.net`;
 }
 
-/** De-duplicate + normalize. Returns valid JIDs and the raw inputs that were rejected. */
-export function prepareRecipients(raw: string[]): { jids: string[]; invalid: string[] } {
+/** De-duplicate + normalize. Returns valid recipients (with their variables) and the raw inputs that were rejected. */
+export function prepareRecipients(raw: RecipientInput[]): { recipients: PreparedRecipient[]; jids: string[]; invalid: string[] } {
     const seen = new Set<string>();
-    const jids: string[] = [];
+    const recipients: PreparedRecipient[] = [];
     const invalid: string[] = [];
     for (const r of raw) {
-        const jid = normalizeRecipient(String(r ?? ""));
-        if (!jid) { invalid.push(String(r)); continue; }
+        let numberLike: string;
+        let vars: TemplateVars = {};
+        if (typeof r === "string") {
+            numberLike = r;
+        } else if (r && typeof r === "object") {
+            numberLike = String(r.jid ?? r.number ?? r.phone ?? "");
+            const { jid: _j, number: _n, phone: _p, vars: nested, name, ...rest } = r;
+            vars = { ...(nested || {}), ...Object.fromEntries(Object.entries(rest).map(([k, v]) => [k, v === null || v === undefined ? null : String(v)])) };
+            if (name !== undefined && name !== null) vars.name = String(name);
+        } else {
+            invalid.push(String(r)); continue;
+        }
+        const jid = normalizeRecipient(numberLike);
+        if (!jid) { invalid.push(numberLike || String(r)); continue; }
         if (seen.has(jid)) continue;
         seen.add(jid);
-        jids.push(jid);
+        recipients.push({ jid, vars });
     }
-    return { jids, invalid };
+    return { recipients, jids: recipients.map(r => r.jid), invalid };
+}
+
+/** Per-message delay for a run that should finish in `spreadHours`. */
+export function delayForSpread(recipientCount: number, spreadHours: number): number {
+    const totalMs = Math.max(0, spreadHours) * 3600 * 1000;
+    const perMessage = recipientCount > 1 ? totalMs / (recipientCount - 1) : BROADCAST_LIMITS.DEFAULT_DELAY_MS;
+    // the engine adds 0..60% jitter on top, so target the average gap (×1.3) at the requested spread
+    return clamp(Math.round(perMessage / 1.3), BROADCAST_LIMITS.MIN_DELAY_MS, BROADCAST_LIMITS.MAX_DELAY_MS);
 }
 
 /** Translate low-level Baileys / runtime errors into something a user can act on. */
@@ -295,9 +334,9 @@ async function waitForConnection(sessionId: string, broadcastId: string, emit: (
     return { socket: null, reason: "Session did not reconnect in time" };
 }
 
-export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcastId: string; total: number; invalid: string[] }> {
+export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcastId: string; total: number; invalid: string[]; delayMs: number }> {
     const { sessionId } = opts;
-    const { jids, invalid } = prepareRecipients(opts.recipients);
+    const { recipients, jids, invalid } = prepareRecipients(opts.recipients);
 
     if (jids.length === 0) throw new Error("No valid recipients");
     if (jids.length > BROADCAST_LIMITS.MAX_RECIPIENTS) {
@@ -309,9 +348,18 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
         throw new Error("Session not connected");
     }
 
-    const delayMs = clamp(Number(opts.delay) || BROADCAST_LIMITS.DEFAULT_DELAY_MS, BROADCAST_LIMITS.MIN_DELAY_MS, BROADCAST_LIMITS.MAX_DELAY_MS);
-    const batchSize = clamp(Number(opts.batchSize) || BROADCAST_LIMITS.DEFAULT_BATCH_SIZE, BROADCAST_LIMITS.MIN_BATCH_SIZE, BROADCAST_LIMITS.MAX_BATCH_SIZE);
-    const batchPauseMs = clamp(Number(opts.batchPauseMs) || BROADCAST_LIMITS.DEFAULT_BATCH_PAUSE_MS, BROADCAST_LIMITS.MIN_BATCH_PAUSE_MS, BROADCAST_LIMITS.MAX_BATCH_PAUSE_MS);
+    const spreadHours = Number(opts.spreadHours) > 0 ? Math.min(72, Number(opts.spreadHours)) : 0;
+    let delayMs = clamp(Number(opts.delay) || BROADCAST_LIMITS.DEFAULT_DELAY_MS, BROADCAST_LIMITS.MIN_DELAY_MS, BROADCAST_LIMITS.MAX_DELAY_MS);
+    let batchSize = clamp(Number(opts.batchSize) || BROADCAST_LIMITS.DEFAULT_BATCH_SIZE, BROADCAST_LIMITS.MIN_BATCH_SIZE, BROADCAST_LIMITS.MAX_BATCH_SIZE);
+    let batchPauseMs = clamp(Number(opts.batchPauseMs) || BROADCAST_LIMITS.DEFAULT_BATCH_PAUSE_MS, BROADCAST_LIMITS.MIN_BATCH_PAUSE_MS, BROADCAST_LIMITS.MAX_BATCH_PAUSE_MS);
+    if (spreadHours > 0) {
+        // Even pacing across the window replaces the batch rhythm.
+        delayMs = delayForSpread(jids.length, spreadHours);
+        batchSize = BROADCAST_LIMITS.MAX_BATCH_SIZE;
+        batchPauseMs = BROADCAST_LIMITS.MIN_BATCH_PAUSE_MS;
+    }
+    const buttons = sanitizeButtons(opts.buttons);
+    const footer = opts.footer?.trim().slice(0, 60) || undefined;
     const simulateTyping = opts.simulateTyping !== false;
     const validateNumbers = opts.validateNumbers !== false;
     const shuffle = opts.shuffle !== false;
@@ -350,20 +398,20 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
     const io = (global as any).io;
     const emit = (partial: Partial<BroadcastProgressPayload> & { status?: BroadcastStatus }) => {
         if (!io) return;
-        io.to(sessionId).emit("broadcast.progress", { broadcastId, total: jids.length, ...partial });
+        io.to(sessionId).emit("broadcast.progress", { broadcastId, sessionId, total: jids.length, ...partial });
     };
 
     emit({ status: "running", sent: 0, failed: 0, progress: 0, current: null, startedAt: log.startedAt.toISOString(), note: validateNumbers ? "Validating numbers…" : null });
 
     // Fire and forget — the HTTP request returns immediately.
-    runBroadcast({ broadcastId, sessionId, dbSessionId, jids, messageContent, template: opts.message || "", delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore: sentLast24h, emit })
+    runBroadcast({ broadcastId, sessionId, dbSessionId, jids, recipients, messageContent, template: opts.message || "", delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore: sentLast24h, buttons, footer, emit })
         .catch(e => logger.error("Broadcast", `${broadcastId} crashed`, e))
         .finally(() => {
             activeBroadcasts.delete(broadcastId);
             cancelledBroadcasts.delete(broadcastId);
         });
 
-    return { broadcastId, total: jids.length, invalid };
+    return { broadcastId, total: jids.length, invalid, delayMs };
 }
 
 interface RunArgs {
@@ -371,6 +419,7 @@ interface RunArgs {
     sessionId: string;
     dbSessionId: string;
     jids: string[];
+    recipients: PreparedRecipient[];
     messageContent: AnyMessageContent;
     /** Raw text/caption with {name} / {a|b} placeholders. */
     template: string;
@@ -383,13 +432,15 @@ interface RunArgs {
     safety: SafetyConfig;
     /** Broadcast messages already sent in the trailing 24h when this run started. */
     sentBefore: number;
+    buttons: BroadcastButton[];
+    footer?: string;
     emit: (p: Partial<BroadcastProgressPayload> & { status?: BroadcastStatus }) => void;
 }
 
 /** Personalised copy of the base content for one recipient (text or caption). */
-function contentFor(base: AnyMessageContent, template: string, name: string | null | undefined): AnyMessageContent {
+function contentFor(base: AnyMessageContent, template: string, vars: TemplateVars): AnyMessageContent {
     if (!hasPersonalization(template)) return base;
-    const text = personalize(template, { name });
+    const text = personalize(template, vars);
     const anyBase = base as any;
     if ("text" in anyBase) return { ...anyBase, text } as AnyMessageContent;
     if ("caption" in anyBase) return { ...anyBase, caption: text } as AnyMessageContent;
@@ -397,8 +448,10 @@ function contentFor(base: AnyMessageContent, template: string, name: string | nu
 }
 
 async function runBroadcast(args: RunArgs) {
-    const { broadcastId, sessionId, dbSessionId, jids, messageContent, template, delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore, emit } = args;
+    const { broadcastId, sessionId, dbSessionId, jids, recipients, messageContent, template, delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore, buttons, footer, emit } = args;
     const timezone = await getSystemTimezone();
+    const varsByJid = new Map(recipients.map(r => [r.jid, r.vars]));
+    let interactiveBroken = false;
 
     let sent = 0;
     let failed = 0;
@@ -577,7 +630,21 @@ async function runBroadcast(args: RunArgs) {
                 }
 
                 const contact = contacts.get(targetJid) || contacts.get(rowJid);
-                await socket.sendMessage(targetJid, contentFor(messageContent, template, contact?.name));
+                const vars: TemplateVars = { name: contact?.name ?? null, ...(varsByJid.get(rowJid) || {}) };
+                const personalised = contentFor(messageContent, template, vars);
+                if (buttons.length > 0 && !interactiveBroken) {
+                    try {
+                        await sendInteractiveMessage(socket, sessionId, targetJid, personalised, buttons, footer);
+                    } catch (e: any) {
+                        // Interactive messages are best-effort; once they fail, fall back to plain sends for the rest of the run.
+                        interactiveBroken = true;
+                        logger.warn("Broadcast", `${broadcastId}: interactive buttons failed (${describeSendError(e)}), falling back to plain messages`);
+                        emit({ status: "running", sent, failed, skipped, progress: progress(), current: targetJid, note: "Buttons not accepted by WhatsApp — continuing without buttons" });
+                        await socket.sendMessage(targetJid, personalised);
+                    }
+                } else {
+                    await socket.sendMessage(targetJid, personalised);
+                }
                 sent++;
                 sentInBatch++;
                 consecutiveFailures = 0;

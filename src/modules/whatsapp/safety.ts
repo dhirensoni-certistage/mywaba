@@ -108,14 +108,35 @@ export async function loadContactsForJids(dbSessionId: string, jids: string[]) {
  * A `{...}` group whose first segment is "name" is a placeholder; any other group with a
  * `|` is spintax; anything else is left untouched.
  */
-export function personalize(template: string, vars: { name?: string | null }): string {
+export type TemplateVars = Record<string, string | null | undefined>;
+
+/** Lower-cased, trimmed copy of the vars so `{Name}` and `{ name }` both resolve. */
+export function normalizeVars(vars: TemplateVars | null | undefined): Record<string, string> {
+    const out: Record<string, string> = {};
+    if (!vars) return out;
+    for (const [k, v] of Object.entries(vars)) {
+        const key = k.trim().toLowerCase();
+        if (!key) continue;
+        if (v === null || v === undefined) continue;
+        out[key] = String(v).trim();
+    }
+    return out;
+}
+
+export function personalize(template: string, vars: TemplateVars): string {
     if (!template || !template.includes("{")) return template;
+    const values = normalizeVars(vars);
     const out = template.replace(/\{([^{}]*)\}/g, (whole, inner: string) => {
         const parts = inner.split("|");
         const key = parts[0].trim().toLowerCase();
-        if (key === "name") {
+        // `{column}` or `{column|fallback}` — any uploaded column, "name" included
+        if (key && Object.prototype.hasOwnProperty.call(values, key)) {
             const fallback = parts.slice(1).join("|").trim();
-            return (vars.name && vars.name.trim()) || fallback;
+            return values[key] || fallback;
+        }
+        if (key === "name") {
+            // no name known for this recipient — use the fallback if given
+            return parts.slice(1).join("|").trim();
         }
         if (parts.length > 1) {
             return parts[Math.floor(Math.random() * parts.length)];

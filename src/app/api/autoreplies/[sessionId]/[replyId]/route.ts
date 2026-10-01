@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
+import { getAuthenticatedUser, canAccessSession, forbidStaff } from "@/lib/api-auth";
 
 export async function PUT(
     request: NextRequest,
@@ -12,6 +12,8 @@ export async function PUT(
         if (!user) {
             return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
         }
+        const staffDenied = forbidStaff(user, "manage auto-replies");
+        if (staffDenied) return staffDenied;
 
         const canAccess = await canAccessSession(user.id, user.role, sessionId);
         if (!canAccess) {
@@ -56,6 +58,8 @@ export async function DELETE(
         if (!user) {
             return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
         }
+        const staffDenied = forbidStaff(user, "manage auto-replies");
+        if (staffDenied) return staffDenied;
 
         const canAccess = await canAccessSession(user.id, user.role, sessionId);
         if (!canAccess) {

@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { waManager } from "@/modules/whatsapp/manager";
-import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
+import { getAuthenticatedUser, canAccessSession, forbidStaff } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(
@@ -12,6 +12,8 @@ export async function POST(
         if (!user) {
             return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 401 });
         }
+        const staffDenied = forbidStaff(user, "start, stop, restart, log out or pair sessions");
+        if (staffDenied) return staffDenied;
 
         const resolvedParams = await params;
         const sessionId = resolvedParams.sessionId;

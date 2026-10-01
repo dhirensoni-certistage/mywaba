@@ -1129,8 +1129,14 @@ All endpoints require authentication via:
                                         properties: {
                                             recipients: {
                                                 type: "array",
-                                                items: { type: "string" },
-                                                example: ["919876543210@s.whatsapp.net", "919876543211@s.whatsapp.net"]
+                                                description: "Numbers/JIDs, or objects with per-recipient template variables ({name}, {city}, …).",
+                                                items: {
+                                                    oneOf: [
+                                                        { type: "string" },
+                                                        { type: "object", properties: { number: { type: "string" }, name: { type: "string", nullable: true }, vars: { type: "object", additionalProperties: { type: "string" } } } }
+                                                    ]
+                                                },
+                                                example: ["919876543210", { number: "919876543211", name: "Asha", vars: { city: "Pune" } }]
                                             },
                                             message: { type: "string", example: "{Hi|Hello} {name|there}, this is a reminder about Friday's seminar.", description: "Supports {name} / {name|fallback} placeholders and {a|b|c} spintax so each message differs." },
                                             mediaUrl: { type: "string", nullable: true, description: "Optional media URL (absolute, or a /api/media/... path)" },
@@ -1140,7 +1146,11 @@ All endpoints require authentication via:
                                             batchPauseMs: { type: "number", description: "Cooldown between batches in ms. 15000–600000 (default 60000)." },
                                             simulateTyping: { type: "boolean", description: "Send 'composing' presence before each message (default true)." },
                                             validateNumbers: { type: "boolean", description: "Skip numbers not registered on WhatsApp (default true)." },
-                                            shuffle: { type: "boolean", description: "Send in random order (default true)." }
+                                            shuffle: { type: "boolean", description: "Send in random order (default true)." },
+                                            spreadHours: { type: "number", description: "Spread the run evenly over N hours (0–72). Overrides delay/batch settings; never below the 3 s minimum." },
+                                            sessionIds: { type: "array", items: { type: "string" }, description: "Other connected sessions the caller may access; recipients are split round-robin across all numbers (one broadcast per number)." },
+                                            buttons: { type: "array", maxItems: 3, description: "BETA interactive buttons.", items: { type: "object", properties: { type: { type: "string", enum: ["reply", "url", "call"] }, text: { type: "string", maxLength: 25 }, url: { type: "string" }, phone: { type: "string" } } } },
+                                            footer: { type: "string", maxLength: 60 }
                                         }
                                     }
                                 }
@@ -1159,9 +1169,11 @@ All endpoints require authentication via:
                                                 data: {
                                                     type: "object",
                                                     properties: {
-                                                        broadcastId: { type: "string" },
-                                                        total: { type: "number", description: "Recipients after de-duplication" },
-                                                        invalidRecipients: { type: "array", items: { type: "string" }, description: "Inputs rejected as malformed numbers" }
+                                                        broadcastId: { type: "string", description: "Primary session's broadcast id" },
+                                                        total: { type: "number", description: "Recipients after de-duplication (all numbers)" },
+                                                        invalidRecipients: { type: "array", items: { type: "string" }, description: "Inputs rejected as malformed numbers" },
+                                                        broadcasts: { type: "array", items: { type: "object", properties: { sessionId: { type: "string" }, broadcastId: { type: "string" }, total: { type: "number" }, delayMs: { type: "number" } } } },
+                                                        rejectedSessions: { type: "array", items: { type: "object", properties: { sessionId: { type: "string" }, reason: { type: "string" } } } }
                                                     }
                                                 }
                                             }
@@ -1186,6 +1198,23 @@ All endpoints require authentication via:
                         responses: {
                             200: { description: "Limits object" },
                             401: { $ref: "#/components/responses/Unauthorized" }
+                        }
+                    }
+                },
+                "/messages/{sessionId}/broadcast/recipients/parse": {
+                    post: {
+                        tags: ["Messaging"],
+                        summary: "Parse an Excel/CSV recipient list",
+                        description: "multipart/form-data with field `file` (.xlsx/.xls/.csv). Detects the number column (phone/number/mobile/whatsapp/contact) and name column; returns rows with every column as a template variable. Max 5000 rows.",
+                        parameters: [
+                            { name: "sessionId", in: "path", required: true, schema: { type: "string" } }
+                        ],
+                        requestBody: { content: { "multipart/form-data": { schema: { type: "object", properties: { file: { type: "string", format: "binary" } } } } } },
+                        responses: {
+                            200: { description: "{ columns, numberColumn, nameColumn, rows: [{ number, name, vars }], invalid, truncated }" },
+                            400: { description: "Empty file, no number column, or file too large" },
+                            401: { $ref: "#/components/responses/Unauthorized" },
+                            403: { $ref: "#/components/responses/Forbidden" }
                         }
                     }
                 },
