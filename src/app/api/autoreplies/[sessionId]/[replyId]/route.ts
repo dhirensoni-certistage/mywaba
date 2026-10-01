@@ -32,7 +32,7 @@ export async function PUT(
             data: {
                 keyword,
                 response,
-                matchType: matchType || "EXACT",
+                matchType: matchType || "SMART",
                 triggerType: triggerType || "ALL",
                 isMedia: isMedia || false,
                 mediaUrl: mediaUrl || null,
