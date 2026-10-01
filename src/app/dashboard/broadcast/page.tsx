@@ -147,6 +147,7 @@ export default function BroadcastPage() {
     const [extraSessions, setExtraSessions] = useState<string[]>([]);
     const [buttons, setButtons] = useState<ButtonDraft[]>([]);
     const [footer, setFooter] = useState("");
+    const [buttonMode, setButtonMode] = useState<"interactive" | "text">("interactive");
     const [limitDraft, setLimitDraft] = useState<string>("");
     const [savingLimit, setSavingLimit] = useState(false);
     const [check, setCheck] = useState<CheckState | null>(null);
@@ -499,7 +500,8 @@ export default function BroadcastPage() {
                     spreadHours: spreadHours > 0 ? spreadHours : undefined,
                     sessionIds: extraSessions.length > 0 ? extraSessions : undefined,
                     buttons: cleanButtons.length > 0 ? cleanButtons : undefined,
-                    footer: cleanButtons.length > 0 && footer.trim() ? footer.trim() : undefined
+                    footer: cleanButtons.length > 0 && footer.trim() ? footer.trim() : undefined,
+                    buttonMode: cleanButtons.length > 0 ? buttonMode : undefined
                 })
             });
 
@@ -783,7 +785,7 @@ export default function BroadcastPage() {
                                             <Label className="text-xs flex items-center gap-1.5"><MousePointerClick className="h-3.5 w-3.5" /> Buttons <span className="px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-700 text-[10px] font-semibold">BETA</span></Label>
                                             <Button type="button" variant="outline" size="sm" onClick={addButton} disabled={loading || buttons.length >= 3}><Plus className="h-3.5 w-3.5 mr-1" /> Add</Button>
                                         </div>
-                                        <p className="text-[11px] text-muted-foreground">Quick-reply, website or call buttons (max 3). WhatsApp only officially supports buttons on the Business API; from a linked device they show on most Android phones and often not on iPhone / Web. If WhatsApp rejects them, the run continues as plain text.</p>
+                                        <p className="text-[11px] text-muted-foreground">Quick-reply, website or call buttons (max 3). WhatsApp only officially supports buttons on the Business API. From a linked device, interactive buttons show on most Android phones and often not on iPhone / Web — <strong>send one test to your own phone first</strong>. If it does not show up there, switch to <em>Text options</em>: the buttons are written out as lines under the message and appear on every phone.</p>
                                         {buttons.map((b, i) => (
                                             <div key={i} className="grid grid-cols-[110px_1fr_auto] gap-2 items-center">
                                                 <Select value={b.type} onValueChange={(v: string) => updateButton(i, { type: v as ButtonDraft["type"] })}>
@@ -803,7 +805,24 @@ export default function BroadcastPage() {
                                             </div>
                                         ))}
                                         {buttons.length > 0 && (
-                                            <Input className="h-8 text-xs" placeholder="Footer line (optional, max 60)" maxLength={60} value={footer} onChange={e => setFooter(e.target.value)} disabled={loading} />
+                                            <>
+                                                <Input className="h-8 text-xs" placeholder="Footer line (optional, max 60)" maxLength={60} value={footer} onChange={e => setFooter(e.target.value)} disabled={loading} />
+                                                <div className="grid grid-cols-[110px_1fr] gap-2 items-center">
+                                                    <Label className="text-xs">Send as</Label>
+                                                    <Select value={buttonMode} onValueChange={(v: string) => setButtonMode(v === "text" ? "text" : "interactive")} disabled={loading}>
+                                                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="interactive">Interactive buttons (BETA — Android mostly)</SelectItem>
+                                                            <SelectItem value="text">Text options (shows on every phone)</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                {buttonMode === "text" ? (
+                                                    <pre className="text-[11px] whitespace-pre-wrap rounded bg-muted p-2 text-muted-foreground">{buttons.filter(b => b.text.trim()).map(b => b.type === "url" ? `🔗 ${b.text}: ${b.url || "https://…"}` : b.type === "call" ? `📞 ${b.text}: ${b.phone || "+91…"}` : `👉 Reply *${b.text}*`).join("\n")}{footer.trim() ? `\n_${footer.trim()}_` : ""}</pre>
+                                                ) : (
+                                                    <p className="text-[11px] text-amber-700 dark:text-amber-400">If WhatsApp rejects the interactive message, the rest of the run is sent with the buttons as text lines automatically. A message that is accepted but not displayed cannot be detected — that is why a test to your own phone matters.</p>
+                                                )}
+                                            </>
                                         )}
                                     </div>
 
@@ -934,7 +953,7 @@ export default function BroadcastPage() {
                                             <li><strong className="text-foreground">Big list?</strong> Use <em>Spread evenly over hours</em> or add more connected numbers — do not raise one number&apos;s daily limit.</li>
                                             <li><strong className="text-foreground">Personalise.</strong> <code className="bg-muted px-1 rounded">{"{name|there}"}</code> and <code className="bg-muted px-1 rounded">{"{Hi|Hello}"}</code>; identical texts get flagged.</li>
                                             <li><strong className="text-foreground">Validate first.</strong> Start checks every number and shows what is not on WhatsApp — remove them, don&apos;t send to dead numbers.</li>
-                                            <li><strong className="text-foreground">Buttons are Beta.</strong> They show on most Android phones, often not on iPhone. Test with 5 people first.</li>
+                                            <li><strong className="text-foreground">Buttons are Beta.</strong> Interactive buttons show on most Android phones, often not on iPhone / Web. Send a test to your own phone first; if nothing shows up, choose <em>Send as → Text options</em>.</li>
                                             <li><strong className="text-foreground">Something failed?</strong> History → Detail → <em>Retry failed</em> re-sends only the deliverable ones.</li>
                                             <li><strong className="text-foreground">Logged out mid-run?</strong> Stop for 24 hours, re-link, resume at half the volume. Alerts for this: Settings → Alerts.</li>
                                             <li><strong className="text-foreground">New or recently logged-out number?</strong> Turn on <em>Warm-up mode</em> in Bot Settings → Broadcast Safety: 20 → 50 → 100 → 150/day over 3 weeks.</li>
@@ -1329,7 +1348,7 @@ export default function BroadcastPage() {
                             </CardHeader>
                             <CardContent className="text-sm">
                                 <ul className="list-disc pl-5 space-y-1.5 text-muted-foreground">
-                                    <li><strong className="text-foreground">Buttons</strong> are officially supported only on the WhatsApp Business API. From a linked device they render on most Android phones and often not on iPhone / Web. If WhatsApp rejects them the run continues as plain text. Test with a few people first.</li>
+                                    <li><strong className="text-foreground">Buttons</strong> are officially supported only on the WhatsApp Business API. From a linked device, <em>Interactive buttons</em> render on most Android phones and often not on iPhone / Web — and a phone that does not support them shows <strong>nothing at all</strong>, not even the text. Always send one test to your own phone first. <em>Text options</em> writes the buttons as lines under the message (👉 Reply *Yes* · 🔗 Website: link · 📞 Call: number) and is displayed by every client; use it for anything important. If WhatsApp rejects an interactive message the run switches to text options by itself.</li>
                                     <li><strong className="text-foreground">Retry failed</strong> (History → Detail) re-sends only recipients that failed for a temporary reason. Not-on-WhatsApp and opted-out numbers are never retried.</li>
                                     <li><strong className="text-foreground">Alerts</strong> (Settings → Alerts, superadmin): Telegram or email when a session is logged out / stopped, a broadcast has failures, or a number used 80% of its daily limit.</li>
                                     <li><strong className="text-foreground">Staff accounts</strong> can broadcast and chat on shared sessions but cannot change settings, sessions, webhooks or limits — ask the owner.</li>

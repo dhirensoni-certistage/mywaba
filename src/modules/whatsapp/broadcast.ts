@@ -8,7 +8,7 @@ import {
     effectiveDailyLimit, isBroadcastPaused, pauseBroadcasts, getEngagementStats, MONITOR, WARMUP_DAYS,
     type EngagementStats, type EffectiveLimit
 } from "./safety";
-import { sendInteractiveMessage, sanitizeButtons, type BroadcastButton } from "./interactive";
+import { sendInteractiveMessage, appendButtonsAsText, sanitizeButtons, type BroadcastButton, type ButtonMode } from "./interactive";
 import { checkNumbers } from "./number-check";
 import { sendAlert } from "@/lib/alerts";
 
@@ -96,6 +96,11 @@ export interface BroadcastOptions {
     buttons?: Array<{ type?: string; text: string; url?: string; phone?: string }> | BroadcastButton[];
     /** Optional footer line under the button message. */
     footer?: string;
+    /**
+     * "interactive" (default): native-flow buttons; "text": the buttons are appended as plain lines
+     * ("👉 Reply *Yes*", "🔗 Website: https://…") which every WhatsApp client displays.
+     */
+    buttonMode?: ButtonMode;
     /** Id of the broadcast this run retries (stored in options for history). */
     retryOf?: string;
 }
@@ -381,6 +386,7 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
     }
     const buttons = sanitizeButtons(opts.buttons);
     const footer = opts.footer?.trim().slice(0, 60) || undefined;
+    const buttonMode: ButtonMode = opts.buttonMode === "text" ? "text" : "interactive";
     const simulateTyping = opts.simulateTyping !== false;
     const validateNumbers = opts.validateNumbers !== false;
     const shuffle = opts.shuffle !== false;
@@ -422,7 +428,7 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
             mediaType: opts.mediaUrl ? (opts.mediaType || "image") : null,
             options: {
                 batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours,
-                buttons, footer: footer || null, retryOf: opts.retryOf || null
+                buttons, footer: footer || null, buttonMode, retryOf: opts.retryOf || null
             } as any,
             status: "running",
             recipients: { create: recipients.map(r => ({ jid: r.jid, status: "pending", vars: Object.keys(r.vars).length ? (r.vars as any) : undefined })) }
@@ -441,7 +447,7 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
     emit({ status: "running", sent: 0, failed: 0, progress: 0, current: null, startedAt: log.startedAt.toISOString(), note: validateNumbers ? "Validating numbers…" : null });
 
     // Fire and forget — the HTTP request returns immediately.
-    runBroadcast({ broadcastId, sessionId, dbSessionId, jids, recipients, messageContent, template: opts.message || "", delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore: sentLast24h, buttons, footer, emit })
+    runBroadcast({ broadcastId, sessionId, dbSessionId, jids, recipients, messageContent, template: opts.message || "", delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore: sentLast24h, buttons, footer, buttonMode, emit })
         .catch(e => logger.error("Broadcast", `${broadcastId} crashed`, e))
         .finally(() => {
             activeBroadcasts.delete(broadcastId);
@@ -471,6 +477,7 @@ interface RunArgs {
     sentBefore: number;
     buttons: BroadcastButton[];
     footer?: string;
+    buttonMode: ButtonMode;
     emit: (p: Partial<BroadcastProgressPayload> & { status?: BroadcastStatus }) => void;
 }
 
@@ -485,7 +492,7 @@ function contentFor(base: AnyMessageContent, template: string, vars: TemplateVar
 }
 
 async function runBroadcast(args: RunArgs) {
-    const { broadcastId, sessionId, dbSessionId, jids, recipients, messageContent, template, delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore, buttons, footer, emit } = args;
+    const { broadcastId, sessionId, dbSessionId, jids, recipients, messageContent, template, delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore, buttons, footer, buttonMode, emit } = args;
     const timezone = await getSystemTimezone();
     const varsByJid = new Map(recipients.map(r => [r.jid, r.vars]));
     let interactiveBroken = false;
@@ -694,16 +701,19 @@ async function runBroadcast(args: RunArgs) {
                 const vars: TemplateVars = { name: contact?.name ?? null, ...(varsByJid.get(rowJid) || {}) };
                 const personalised = contentFor(messageContent, template, vars);
                 let sentMsg: any = null;
-                if (buttons.length > 0 && !interactiveBroken) {
+                if (buttons.length > 0 && buttonMode === "interactive" && !interactiveBroken) {
                     try {
                         sentMsg = await sendInteractiveMessage(socket, sessionId, targetJid, personalised, buttons, footer);
                     } catch (e: any) {
-                        // Interactive messages are best-effort; once they fail, fall back to plain sends for the rest of the run.
+                        // Interactive messages are best-effort; once WhatsApp rejects one, send the rest of the
+                        // run with the buttons written out as text lines so the information is not lost.
                         interactiveBroken = true;
-                        logger.warn("Broadcast", `${broadcastId}: interactive buttons failed (${describeSendError(e)}), falling back to plain messages`);
-                        emit({ status: "running", sent, failed, skipped, progress: progress(), current: targetJid, note: "Buttons not accepted by WhatsApp — continuing without buttons" });
-                        sentMsg = await socket.sendMessage(targetJid, personalised);
+                        logger.warn("Broadcast", `${broadcastId}: interactive buttons failed (${describeSendError(e)}), continuing with buttons as text`);
+                        emit({ status: "running", sent, failed, skipped, progress: progress(), current: targetJid, note: "Buttons not accepted by WhatsApp — continuing with the buttons written as text" });
+                        sentMsg = await socket.sendMessage(targetJid, appendButtonsAsText(personalised, buttons, footer));
                     }
+                } else if (buttons.length > 0) {
+                    sentMsg = await socket.sendMessage(targetJid, appendButtonsAsText(personalised, buttons, footer));
                 } else {
                     sentMsg = await socket.sendMessage(targetJid, personalised);
                 }

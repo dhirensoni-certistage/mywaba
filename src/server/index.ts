@@ -9,6 +9,7 @@ import { parse } from "url";
 import next from "next";
 import { Server } from "socket.io";
 import { setupSocket } from "./socket";
+import { installDiagnostics } from "./diagnostics";
 import { waManager } from "../modules/whatsapp/manager";
 import { logger } from "../lib/logger";
 import pkg from "../../package.json";
@@ -21,6 +22,9 @@ if (!process.env.AUTH_SECRET) {
   logger.error("Server", "AUTH_SECRET is not set. Generate one with: openssl rand -base64 32");
   process.exit(1);
 }
+
+// `kill -USR2 <pid>` → 30s CPU profile + hottest functions in the log (see diagnostics.ts)
+installDiagnostics();
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
