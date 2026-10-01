@@ -3,6 +3,8 @@ import cronParser from "cron-parser";
 import { prisma } from "@/lib/prisma";
 import { waManager } from "@/modules/whatsapp/manager";
 import { logger } from "./logger";
+import { getEngagementStats, MONITOR } from "@/modules/whatsapp/safety";
+import { sendAlert } from "./alerts";
 
 /**
  * Scheduled-message runner.
@@ -124,7 +126,11 @@ export async function runSchedulerTick() {
     }
 }
 
-let initialized = false;
+// `var` on purpose: manager.ts imports this module and calls initScheduler() from its singleton
+// constructor, which can run while this module is still evaluating (circular import). A `let`
+// would be in its temporal dead zone at that moment; `var` is hoisted as undefined (falsy).
+// eslint-disable-next-line no-var
+var initialized = false;
 
 export function initScheduler() {
     if (initialized) return;
@@ -139,5 +145,34 @@ export function initScheduler() {
     // Run every minute
     cron.schedule("* * * * *", () => { runSchedulerTick(); });
 
+    // Engagement monitor: every 30 minutes, warn once a day per session when a lot was sent and almost nobody replied
+    cron.schedule("*/30 * * * *", () => { runEngagementMonitor().catch(e => logger.error("Monitor", "engagement monitor failed", e)); });
+
     logger.info("Cron", "Scheduler initialized");
+}
+
+
+export async function runEngagementMonitor() {
+    const sessions = await prisma.session.findMany({
+        where: { status: "CONNECTED" },
+        select: { sessionId: true, userId: true }
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    for (const s of sessions) {
+        try {
+            const stats = await getEngagementStats(s.sessionId, 24);
+            if (stats.sent >= MONITOR.LOW_REPLY_MIN_SENT && stats.replyRate !== null && stats.replyRate < MONITOR.LOW_REPLY_PCT) {
+                await sendAlert({
+                    kind: "limit",
+                    title: `${s.sessionId}: very low engagement (${stats.replyRate}% replies on ${stats.sent} sends in 24h)`,
+                    message: `Delivered ${stats.deliveredRate ?? "?"}%, read ${stats.readRate ?? "?"}%, replied ${stats.replyRate}%. Lists with almost no replies are how numbers get reported. Consider pausing, cleaning the list, personalising the text and sending only to people who know you.`,
+                    userId: s.userId,
+                    href: "/dashboard/broadcast",
+                    dedupeKey: `lowreply:${s.sessionId}:${today}`
+                });
+            }
+        } catch (e) {
+            logger.debug("Monitor", `engagement check failed for ${s.sessionId}`, e);
+        }
+    }
 }

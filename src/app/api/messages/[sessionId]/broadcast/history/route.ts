@@ -36,9 +36,32 @@ export async function GET(
             prisma.broadcastLog.count({ where: { sessionId } })
         ]);
 
+        // Engagement counters per broadcast (one grouped query instead of N)
+        const ids = logs.map(l => l.id);
+        const engagement = new Map<string, { replied: number; delivered: number; read: number }>();
+        if (ids.length > 0) {
+            const rows = await prisma.broadcastRecipient.groupBy({
+                by: ["broadcastLogId", "deliveryStatus"],
+                where: { broadcastLogId: { in: ids }, status: "sent" },
+                _count: { _all: true }
+            });
+            const replies = await prisma.broadcastRecipient.groupBy({
+                by: ["broadcastLogId"],
+                where: { broadcastLogId: { in: ids }, repliedAt: { not: null } },
+                _count: { _all: true }
+            });
+            for (const id of ids) engagement.set(id, { replied: 0, delivered: 0, read: 0 });
+            for (const r of rows) {
+                const e = engagement.get(r.broadcastLogId)!;
+                if (r.deliveryStatus === "DELIVERED" || r.deliveryStatus === "READ") e.delivered += r._count._all;
+                if (r.deliveryStatus === "READ") e.read += r._count._all;
+            }
+            for (const r of replies) engagement.get(r.broadcastLogId)!.replied = r._count._all;
+        }
+
         return NextResponse.json({
             status: true,
-            data: logs,
+            data: logs.map(l => ({ ...l, engagement: engagement.get(l.id) || { replied: 0, delivered: 0, read: 0 } })),
             total,
             limit,
             offset

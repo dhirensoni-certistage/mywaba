@@ -293,6 +293,14 @@ model BotConfig {
   optOutKeywords      Json?                  // ["STOP", "UNSUBSCRIBE"] (case-insensitive, exact match)
   optOutReply         String? @db.Text       // Optional confirmation sent once when someone opts out
 
+  // Warm-up (new numbers): the daily cap ramps 20 → 50 → 100 → 150 → dailyBroadcastLimit over 3 weeks
+  warmupEnabled       Boolean  @default(false)
+  warmupStartedAt     DateTime?
+
+  // Auto-pause set by the delivery monitor (delivery collapse = likely spam filter / blocks)
+  broadcastPausedUntil DateTime?
+  broadcastPauseReason String? @db.Text
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -410,7 +418,16 @@ model BroadcastRecipient {
   error           String?      @db.Text
   sentAt          DateTime?
 
+  // Engagement tracking (filled from WhatsApp receipts and incoming replies)
+  messageId       String?      // WhatsApp message key id of what we sent
+  deliveryStatus  String?      // SENT, DELIVERED, READ (null = no receipt yet)
+  deliveredAt     DateTime?
+  readAt          DateTime?
+  repliedAt       DateTime?    // Recipient wrote back within 72h of the send
+
   broadcastLog    BroadcastLog @relation(fields: [broadcastLogId], references: [id], onDelete: Cascade)
 
   @@index([broadcastLogId])
+  @@index([messageId])
+  @@index([jid, sentAt])
 }

@@ -4,7 +4,9 @@ import { waManager } from "./manager";
 import type { AnyMessageContent } from "@whiskeysockets/baileys";
 import {
     loadSafetyConfig, countSentLast24h, getSystemTimezone, currentHourInTz, isInQuietHours, formatHour,
-    loadContactsForJids, personalize, hasPersonalization, type SafetyConfig, type TemplateVars
+    loadContactsForJids, personalize, hasPersonalization, type SafetyConfig, type TemplateVars,
+    effectiveDailyLimit, isBroadcastPaused, pauseBroadcasts, getEngagementStats, MONITOR, WARMUP_DAYS,
+    type EngagementStats, type EffectiveLimit
 } from "./safety";
 import { sendInteractiveMessage, sanitizeButtons, type BroadcastButton } from "./interactive";
 import { checkNumbers } from "./number-check";
@@ -107,6 +109,11 @@ export interface BroadcastHealth {
     timezone: string;
     sessionStatus: string;
     lastDisconnectReason: string | null;
+    /** Limit that applies today (warm-up cap or daily limit) */
+    effective: EffectiveLimit & { warmupEnabled: boolean; warmupTotalDays: number };
+    paused: { until: string | null; reason: string | null; active: boolean };
+    engagement7d: EngagementStats;
+    engagement24h: EngagementStats;
 }
 
 /** Snapshot of the number's broadcast budget + protections — shown on the Broadcast page. */
@@ -125,15 +132,25 @@ export async function getBroadcastHealth(sessionId: string): Promise<BroadcastHe
         ? `${formatHour(safety.quietHoursStart)} – ${formatHour(safety.quietHoursEnd)}`
         : null;
     const instance = waManager.getInstance(sessionId);
+    const effective = effectiveDailyLimit(safety);
+    const [engagement7d, engagement24h] = await Promise.all([getEngagementStats(sessionId, 24 * 7), getEngagementStats(sessionId, 24)]);
     return {
         sentLast24h,
-        dailyLimit: safety.dailyBroadcastLimit,
-        remaining: safety.dailyBroadcastLimit > 0 ? Math.max(0, safety.dailyBroadcastLimit - sentLast24h) : Number.POSITIVE_INFINITY,
+        dailyLimit: effective.limit,
+        remaining: effective.limit > 0 ? Math.max(0, effective.limit - sentLast24h) : Number.POSITIVE_INFINITY,
         quietHours: { start: safety.quietHoursStart, end: safety.quietHoursEnd, active, label },
         optedOutCount,
         timezone,
         sessionStatus: instance?.status || "STOPPED",
-        lastDisconnectReason: instance?.lastDisconnectReason || null
+        lastDisconnectReason: instance?.lastDisconnectReason || null,
+        effective: { ...effective, warmupEnabled: safety.warmupEnabled, warmupTotalDays: WARMUP_DAYS },
+        paused: {
+            until: safety.broadcastPausedUntil?.toISOString() || null,
+            reason: safety.broadcastPauseReason,
+            active: isBroadcastPaused(safety)
+        },
+        engagement7d,
+        engagement24h
     };
 }
 
@@ -371,16 +388,26 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
     // Number protection: daily budget check before anything is queued.
     const { dbSessionId, safety } = await loadSafetyConfig(sessionId);
     if (!dbSessionId) throw new Error("Session not found");
+    if (isBroadcastPaused(safety)) {
+        const until = safety.broadcastPausedUntil!.toLocaleString("en-IN", { timeZone: process.env.TZ || "Asia/Kolkata" });
+        throw new Error(`Broadcasting is paused on this number until ${until}: ${safety.broadcastPauseReason || "delivery problems detected"}. Resume from Number Health only if you understand the risk.`);
+    }
     const sentLast24h = await countSentLast24h(sessionId);
-    if (safety.dailyBroadcastLimit > 0) {
-        const remaining = safety.dailyBroadcastLimit - sentLast24h;
+    const effective = effectiveDailyLimit(safety);
+    const limitLabel = effective.source === "warmup"
+        ? `warm-up cap of ${effective.limit} (day ${effective.warmupDay} of ${WARMUP_DAYS})`
+        : `daily limit of ${effective.limit}`;
+    if (effective.limit > 0) {
+        const remaining = effective.limit - sentLast24h;
         if (remaining <= 0) {
-            throw new Error(`Daily limit reached: ${sentLast24h} broadcast messages were already sent in the last 24 hours (limit ${safety.dailyBroadcastLimit}). Wait, or raise the limit in Bot Settings → Broadcast Safety.`);
+            throw new Error(`Limit reached: ${sentLast24h} broadcast messages were already sent in the last 24 hours (${limitLabel}). Wait, or change the limit in Bot Settings → Broadcast Safety.`);
         }
         if (jids.length > remaining) {
-            throw new Error(`Only ${remaining} of your daily limit of ${safety.dailyBroadcastLimit} remain (${sentLast24h} sent in the last 24 hours), but this list has ${jids.length} recipients. Send to at most ${remaining} now, or raise the limit in Bot Settings → Broadcast Safety.`);
+            throw new Error(`Only ${remaining} of your ${limitLabel} remain (${sentLast24h} sent in the last 24 hours), but this list has ${jids.length} recipients. Send to at most ${remaining} now, or change the limit in Bot Settings → Broadcast Safety.`);
         }
     }
+    // Make the rest of the engine use the effective cap
+    safety.dailyBroadcastLimit = effective.limit;
 
     // Build content first so a bad media URL fails fast instead of per recipient.
     const messageContent = await buildMessageContent(opts);
@@ -666,23 +693,50 @@ async function runBroadcast(args: RunArgs) {
                 const contact = contacts.get(targetJid) || contacts.get(rowJid);
                 const vars: TemplateVars = { name: contact?.name ?? null, ...(varsByJid.get(rowJid) || {}) };
                 const personalised = contentFor(messageContent, template, vars);
+                let sentMsg: any = null;
                 if (buttons.length > 0 && !interactiveBroken) {
                     try {
-                        await sendInteractiveMessage(socket, sessionId, targetJid, personalised, buttons, footer);
+                        sentMsg = await sendInteractiveMessage(socket, sessionId, targetJid, personalised, buttons, footer);
                     } catch (e: any) {
                         // Interactive messages are best-effort; once they fail, fall back to plain sends for the rest of the run.
                         interactiveBroken = true;
                         logger.warn("Broadcast", `${broadcastId}: interactive buttons failed (${describeSendError(e)}), falling back to plain messages`);
                         emit({ status: "running", sent, failed, skipped, progress: progress(), current: targetJid, note: "Buttons not accepted by WhatsApp — continuing without buttons" });
-                        await socket.sendMessage(targetJid, personalised);
+                        sentMsg = await socket.sendMessage(targetJid, personalised);
                     }
                 } else {
-                    await socket.sendMessage(targetJid, personalised);
+                    sentMsg = await socket.sendMessage(targetJid, personalised);
                 }
                 sent++;
                 sentInBatch++;
                 consecutiveFailures = 0;
-                await markRecipient(rowJid, { status: "sent", sentAt: new Date(), error: null });
+                const messageId: string | null = sentMsg?.key?.id || null;
+                await prisma.broadcastRecipient.updateMany({
+                    where: { broadcastLogId: broadcastId, jid: rowJid },
+                    data: { status: "sent", sentAt: new Date(), error: null, messageId, deliveryStatus: messageId ? "SENT" : null }
+                }).catch(() => {});
+
+                // Delivery monitor: if most messages sent >10 min ago still have no receipt, WhatsApp is
+                // most likely filtering this number (or recipients are blocking it). Stop and pause.
+                if (sent % 20 === 0) {
+                    try {
+                        const staleBefore = new Date(Date.now() - 10 * 60 * 1000);
+                        const [staleBase, staleUndelivered] = await Promise.all([
+                            prisma.broadcastRecipient.count({ where: { broadcastLogId: broadcastId, status: "sent", sentAt: { lte: staleBefore } } }),
+                            prisma.broadcastRecipient.count({ where: { broadcastLogId: broadcastId, status: "sent", sentAt: { lte: staleBefore }, OR: [{ deliveryStatus: null }, { deliveryStatus: "SENT" }] } })
+                        ]);
+                        if (staleBase >= MONITOR.MIN_STALE_SAMPLE) {
+                            const pct = Math.round((staleUndelivered / staleBase) * 100);
+                            if (pct >= MONITOR.UNDELIVERED_PAUSE_PCT) {
+                                const until = await pauseBroadcasts(sessionId, MONITOR.PAUSE_HOURS, `Delivery collapse: ${pct}% of messages sent more than 10 minutes ago were never delivered (${staleUndelivered}/${staleBase}). This is what a spam filter or mass blocking looks like.`);
+                                await finish("failed", `Stopped by the delivery monitor: ${pct}% of the last ${staleBase} messages (sent >10 min ago) were never delivered. Broadcasting on this number is paused for ${MONITOR.PAUSE_HOURS}h (until ${until.toLocaleString("en-IN", { timeZone: timezone })}). Do not resume with the same list.`);
+                                return;
+                            }
+                        }
+                    } catch (e) {
+                        logger.debug("Broadcast", "delivery monitor check failed", e);
+                    }
+                }
             } catch (e: any) {
                 failed++;
                 consecutiveFailures++;
