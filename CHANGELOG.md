@@ -1,6 +1,7 @@
 ## [v1.7.1] - 2026-10-01
 
 ### Fixed
+- **Auto Reply dialog overflowed**: the long Match Type labels pushed the select past the dialog edge. Labels shortened (explanation stays in the help text), selects and grid cells may shrink, dialog scrolls on small screens.
 - **Role changes did not apply until the user logged out and in again**: the role lives in the login token and was only set at sign-in, so a STAFF account promoted to OWNER in Users kept the staff sidebar, gates and client-side checks. The token now re-reads role, name and email from the database once a minute (and when the account was deleted, the session is invalidated).
 - **Users → Edit looked broken**: the edit form opened as a card at the very top of the page, out of view when Edit was pressed further down. It is now a dialog, with a role legend; API errors (duplicate email, short password, invalid role, removing your own Super Admin role) are shown with their real message.
 

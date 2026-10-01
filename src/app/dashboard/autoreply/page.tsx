@@ -208,14 +208,14 @@ export default function AutoReplyPage() {
                             New Rule
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-[500px]">
+                    <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle>Create Auto-Reply Rule</DialogTitle>
                             <DialogDescription>Add a new keyword-based response.</DialogDescription>
                         </DialogHeader>
                         <div className="space-y-4 py-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-0">
+                                <div className="space-y-2 min-w-0">
                                     <Label>Keyword</Label>
                                     <Input 
                                         value={keyword} 
@@ -223,28 +223,28 @@ export default function AutoReplyPage() {
                                         placeholder="e.g. !help, ping" 
                                     />
                                 </div>
-                                <div className="space-y-2">
+                                <div className="space-y-2 min-w-0">
                                     <Label>Match Type</Label>
                                     <Select value={matchType} onValueChange={setMatchType}>
-                                        <SelectTrigger>
+                                        <SelectTrigger className="w-full min-w-0 truncate">
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="SMART">Smart (recommended) — typos, plurals, any order</SelectItem>
-                                            <SelectItem value="EXACT">Exact Match — whole message equals keyword</SelectItem>
-                                            <SelectItem value="CONTAINS">Contains — keyword phrase anywhere</SelectItem>
+                                            <SelectItem value="SMART">Smart (recommended)</SelectItem>
+                                            <SelectItem value="EXACT">Exact match</SelectItem>
+                                            <SelectItem value="CONTAINS">Contains</SelectItem>
                                             <SelectItem value="STARTS_WITH">Starts With</SelectItem>
                                             <SelectItem value="REGEX">Regex Pattern</SelectItem>
                                         </SelectContent>
                                     </Select>
-                                    <p className="text-[11px] text-muted-foreground">Several triggers in one rule: separate them with <code className="bg-muted px-1 rounded">|</code> — e.g. <code className="bg-muted px-1 rounded">price | rate | cost</code>. Case, punctuation and emojis are ignored for every type except Regex. <strong>Smart</strong> also forgives typos (&quot;pricee&quot;, &quot;helo&quot;) and plurals and matches the words in any order.</p>
+                                    <p className="text-[11px] text-muted-foreground">Several triggers in one rule: separate them with <code className="bg-muted px-1 rounded">|</code> — e.g. <code className="bg-muted px-1 rounded">price | rate | cost</code>. Case, punctuation and emojis are ignored for every type except Regex. <strong>Smart</strong> also forgives typos (&quot;pricee&quot;, &quot;helo&quot;), plurals and word order; <strong>Exact</strong> needs the whole message to equal the keyword; <strong>Contains</strong> finds the phrase anywhere.</p>
                                 </div>
                             </div>
 
                             <div className="space-y-2">
                                 <Label>Select Trigger Audience</Label>
                                 <Select value={triggerType} onValueChange={setTriggerType}>
-                                    <SelectTrigger>
+                                    <SelectTrigger className="w-full min-w-0 truncate">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -280,7 +280,7 @@ export default function AutoReplyPage() {
                                     <div className="space-y-2">
                                         <Label>Media Type</Label>
                                         <Select value={mediaType} onValueChange={setMediaType}>
-                                            <SelectTrigger>
+                                            <SelectTrigger className="w-full min-w-0 truncate">
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -379,14 +379,14 @@ export default function AutoReplyPage() {
                 setIsEditOpen(open);
                 if (!open) setEditId(null);
             }}>
-                <DialogContent className="sm:max-w-[500px]">
+                <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Edit Auto-Reply Rule</DialogTitle>
                         <DialogDescription>Modify the keyword-based response rule.</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-0">
+                            <div className="space-y-2 min-w-0">
                                 <Label>Keyword</Label>
                                 <Input 
                                     value={editKeyword} 
@@ -394,10 +394,10 @@ export default function AutoReplyPage() {
                                     placeholder="e.g. !help, ping" 
                                 />
                             </div>
-                            <div className="space-y-2">
+                            <div className="space-y-2 min-w-0">
                                 <Label>Match Type</Label>
                                 <Select value={editMatchType} onValueChange={setEditMatchType}>
-                                    <SelectTrigger>
+                                    <SelectTrigger className="w-full min-w-0 truncate">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -414,7 +414,7 @@ export default function AutoReplyPage() {
                         <div className="space-y-2">
                             <Label>Select Trigger Audience</Label>
                             <Select value={editTriggerType} onValueChange={setEditTriggerType}>
-                                <SelectTrigger>
+                                <SelectTrigger className="w-full min-w-0 truncate">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -449,7 +449,7 @@ export default function AutoReplyPage() {
                                 <div className="space-y-2">
                                     <Label>Media Type</Label>
                                     <Select value={editMediaType} onValueChange={setEditMediaType}>
-                                        <SelectTrigger>
+                                        <SelectTrigger className="w-full min-w-0 truncate">
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
