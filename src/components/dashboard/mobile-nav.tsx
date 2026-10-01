@@ -1,5 +1,8 @@
 "use client";
 
+import { useEnabledModules } from "./use-enabled-modules";
+import { isModuleEnabled } from "@/lib/modules";
+
 import { useState } from "react";
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -98,6 +101,7 @@ export function MobileNav({ appName = "WABA" }: { appName?: string }) {
     const { data: session } = useSession();
     // @ts-ignore
     const userRole = session?.user?.role;
+    const enabledModules = useEnabledModules();
 
     const isActive = (href: string) => {
         if (href === "/dashboard") return pathname === "/dashboard";
@@ -120,7 +124,9 @@ export function MobileNav({ appName = "WABA" }: { appName?: string }) {
                 <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-1">
                     {navGroups.map((group) => {
                         const visibleItems = group.items.filter(
-                            (item) => (!item.superadminOnly || userRole === "SUPERADMIN") && (!item.ownerOnly || userRole !== "STAFF")
+                            (item) => (!item.superadminOnly || userRole === "SUPERADMIN")
+                                && (!item.ownerOnly || userRole !== "STAFF")
+                                && (enabledModules === undefined || isModuleEnabled(item.href, userRole, enabledModules))
                         );
                         if (visibleItems.length === 0) return null;
 

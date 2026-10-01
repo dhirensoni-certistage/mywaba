@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-auth";
 import { invalidateAlertSettings, smtpConfigured } from "@/lib/alerts";
+import { CONFIGURABLE_MODULES } from "@/lib/modules";
 
 export async function GET(request: NextRequest) {
     try {
@@ -50,6 +51,18 @@ export async function POST(req: Request) {
         if (body.alertOnLogout !== undefined) alerts.alertOnLogout = Boolean(body.alertOnLogout);
         if (body.alertOnBroadcast !== undefined) alerts.alertOnBroadcast = Boolean(body.alertOnBroadcast);
         if (body.alertOnLimit !== undefined) alerts.alertOnLimit = Boolean(body.alertOnLimit);
+
+        // Sidebar modules: array of hrefs, or null for "all". Only known, configurable hrefs are kept.
+        if (body.enabledModules !== undefined) {
+            if (body.enabledModules === null) {
+                (alerts as Record<string, unknown>).enabledModules = null;
+            } else if (Array.isArray(body.enabledModules)) {
+                const known = new Set(CONFIGURABLE_MODULES.map(m => m.href));
+                const list = Array.from(new Set(body.enabledModules.map(String).filter((h: string) => known.has(h))));
+                if (!list.includes("/dashboard")) list.unshift("/dashboard"); // home is always available
+                (alerts as Record<string, unknown>).enabledModules = list;
+            }
+        }
 
         const general: Record<string, unknown> = {};
         if (appName !== undefined) general.appName = appName;

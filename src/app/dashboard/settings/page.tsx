@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { RefreshCw, Save, AlertCircle, Bell, Send } from "lucide-react";
+import { RefreshCw, Save, AlertCircle, Bell, Send, LayoutList } from "lucide-react";
+import { CONFIGURABLE_MODULES, MODULE_PRESETS } from "@/lib/modules";
+import { resetEnabledModulesCache } from "@/components/dashboard/use-enabled-modules";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
@@ -32,6 +34,9 @@ export default function SettingsPage() {
         alertOnLimit: true,
     });
     const [smtpConfigured, setSmtpConfigured] = useState(false);
+    // null = all modules visible
+    const [enabledModules, setEnabledModules] = useState<string[] | null>(null);
+    const [modulesLoading, setModulesLoading] = useState(false);
     const [alertsLoading, setAlertsLoading] = useState(false);
     const [testingAlert, setTestingAlert] = useState(false);
     const [timezones, setTimezones] = useState<string[]>(["UTC", "Asia/Jakarta", "Asia/Makassar", "Asia/Jayapura"]);
@@ -75,6 +80,7 @@ export default function SettingsPage() {
                         alertOnLimit: data.alertOnLimit ?? true,
                     });
                     setSmtpConfigured(Boolean(data.smtpConfigured));
+                    setEnabledModules(Array.isArray(data.enabledModules) ? data.enabledModules : null);
                 }
             })
             .catch(() => { });
@@ -96,6 +102,38 @@ export default function SettingsPage() {
             setAlertsLoading(false);
         }
     };
+
+    const handleSaveModules = async () => {
+        setModulesLoading(true);
+        try {
+            const res = await fetch('/api/settings/system', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabledModules })
+            });
+            if (res.ok) {
+                toast.success("Sidebar modules saved");
+                resetEnabledModulesCache();
+                window.dispatchEvent(new CustomEvent("system-settings-updated", { detail: {} }));
+                router.refresh();
+            } else {
+                toast.error("Failed to save modules");
+            }
+        } catch {
+            toast.error("Failed to save modules");
+        } finally {
+            setModulesLoading(false);
+        }
+    };
+    const moduleOn = (href: string) => enabledModules === null || enabledModules.includes(href);
+    const toggleModule = (href: string) => {
+        setEnabledModules(prev => {
+            const base = prev === null ? CONFIGURABLE_MODULES.map(m => m.href) : prev;
+            const next = base.includes(href) ? base.filter(h => h !== href) : [...base, href];
+            return next.includes("/dashboard") ? next : ["/dashboard", ...next];
+        });
+    };
+    const moduleGroups = Array.from(new Set(CONFIGURABLE_MODULES.map(m => m.group)));
 
     const handleTestAlert = async () => {
         setTestingAlert(true);
@@ -257,6 +295,54 @@ export default function SettingsPage() {
                             Save Configuration
                         </Button>
                     </div>
+                </CardContent>
+            </Card>
+
+            {/* Sidebar & Modules */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><LayoutList className="h-5 w-5" /> Sidebar &amp; Modules</CardTitle>
+                    <CardDescription>
+                        Choose what your users see in the menu. Unticked modules disappear from the sidebar and their pages show &quot;not enabled&quot;. SuperAdmins always see everything. Staff never see owner-only modules regardless of this setting.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                    <div className="flex flex-wrap gap-2">
+                        {Object.entries(MODULE_PRESETS).map(([key, preset]) => (
+                            <Button key={key} type="button" variant="outline" size="sm" disabled={!isSuperAdmin}
+                                title={preset.description}
+                                onClick={() => setEnabledModules(key === "full" ? null : [...preset.hrefs])}>
+                                {preset.label}
+                            </Button>
+                        ))}
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {moduleGroups.map(group => (
+                            <div key={group} className="rounded-lg border p-3 space-y-2">
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group}</p>
+                                {CONFIGURABLE_MODULES.filter(m => m.group === group).map(m => (
+                                    <label key={m.href} className={`flex items-start gap-2 text-sm ${m.href === "/dashboard" ? "opacity-60" : "cursor-pointer"}`}>
+                                        <input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary"
+                                            checked={moduleOn(m.href)}
+                                            disabled={!isSuperAdmin || m.href === "/dashboard"}
+                                            onChange={() => toggleModule(m.href)} />
+                                        <span>
+                                            <span className="font-medium">{m.label}</span>
+                                            {m.ownerOnly && <span className="ml-1 text-[10px] px-1 rounded bg-muted text-muted-foreground">owner only</span>}
+                                            {m.description && <span className="block text-xs text-muted-foreground">{m.description}</span>}
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                        ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        {enabledModules === null ? "All modules are visible." : `${enabledModules.length} of ${CONFIGURABLE_MODULES.length} modules visible.`}
+                    </p>
+                    <Button onClick={handleSaveModules} disabled={modulesLoading || !isSuperAdmin}>
+                        {modulesLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                        Save Modules
+                    </Button>
                 </CardContent>
             </Card>
 

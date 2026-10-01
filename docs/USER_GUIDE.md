@@ -43,6 +43,13 @@ Before you can use any automation features, you must link a WhatsApp account.
 
 ## 📢 Mass Communication
 
+### 0. Sidebar & Modules (SuperAdmin)
+
+Settings → **Sidebar & Modules** decides what everyone else sees in the menu. Pick a preset
+(**Broadcast essentials** for a marketing client, **Support desk** for a chat team, **Everything**) or
+tick modules one by one. Hidden modules disappear from the sidebar and their pages show "not enabled".
+SuperAdmins always see everything.
+
 ### 1. Broadcast Engine
 - Send bulk messages to multiple numbers or groups.
 - **Anti-Ban Protection**: Numbers are verified on WhatsApp before sending, every message gets a random delay (minimum 3s, 8s default, +60% jitter), the engine pauses between batches, simulates typing, stops automatically if the session disconnects or fails repeatedly, and can be cancelled from the dashboard. Upload an Excel/CSV with `phone` + `name` (+ any columns) and personalise with `{name}` / `{column}`; spread big lists over hours or across several connected numbers. See [Broadcast Safety](BROADCAST_SAFETY.md).
