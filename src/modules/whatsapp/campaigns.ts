@@ -16,7 +16,7 @@ import { sendAlert } from "@/lib/alerts";
 import { canAccessSession } from "@/lib/api-auth";
 import { waManager } from "./manager";
 import { startBroadcast, type RecipientInput, type BroadcastOptions } from "./broadcast";
-import { getSystemTimezone } from "./safety";
+import { getSystemTimezone, loadSafetyConfig, countSentLast24h, effectiveDailyLimit, isBroadcastPaused } from "./safety";
 
 export type CampaignStatus = "SCHEDULED" | "RUNNING" | "PAUSED" | "DONE" | "FAILED" | "CANCELLED";
 
@@ -34,9 +34,28 @@ export interface LaunchResult {
 /** How long a due campaign waits for its number to come back online before it is marked failed. */
 export const CAMPAIGN_OFFLINE_GRACE_MIN = 30;
 
+/** Messages a number can still send today: Infinity when it has no limit. */
+async function remainingCapacity(sessionId: string): Promise<{ remaining: number; paused: string | null }> {
+    const { safety } = await loadSafetyConfig(sessionId);
+    if (isBroadcastPaused(safety)) {
+        const until = safety.broadcastPausedUntil!.toLocaleString("en-IN", { timeZone: process.env.TZ || "Asia/Kolkata" });
+        return { remaining: 0, paused: `Broadcasting is paused on this number until ${until}: ${safety.broadcastPauseReason || "delivery problems detected"}. Resume from Number Health only if you understand the risk.` };
+    }
+    const effective = effectiveDailyLimit(safety);
+    if (effective.limit <= 0) return { remaining: Number.POSITIVE_INFINITY, paused: null };
+    const sent = await countSentLast24h(sessionId);
+    return { remaining: Math.max(0, effective.limit - sent), paused: null };
+}
+
 /**
  * Start one broadcast per target number, splitting the recipients round-robin across the primary
  * session and every extra session the user may use that is currently connected.
+ *
+ * The split respects what each number can still send today (daily limit / warm-up cap minus the
+ * last 24 h, delivery-monitor pause): a number that is full or paused is skipped and the others
+ * take its share. If the selected numbers together cannot take the whole list, nothing is started
+ * and the error says how many more are needed — before this, an even split handed a number more
+ * than it could send, its run was refused and that share of the list was silently never sent.
  * Shared by POST /broadcast (immediate) and the campaign scheduler.
  */
 export async function launchBroadcasts(args: {
@@ -60,8 +79,41 @@ export async function launchBroadcasts(args: {
         targetSessions.push(extra);
     }
 
+    // Capacity per number. A paused primary is a hard error; a primary that is merely full stays in
+    // the list with an empty share so the extras carry the run. Extras that are full or paused are dropped.
+    const capacity = await Promise.all(targetSessions.map(remainingCapacity));
+    if (capacity[0].paused) throw new Error(capacity[0].paused);
+    for (let i = targetSessions.length - 1; i >= 1; i--) {
+        const c = capacity[i];
+        if (c.paused) { rejectedSessions.push({ sessionId: targetSessions[i], reason: "broadcasting paused (delivery monitor)" }); }
+        else if (c.remaining <= 0) { rejectedSessions.push({ sessionId: targetSessions[i], reason: "daily limit reached" }); }
+        else continue;
+        targetSessions.splice(i, 1);
+        capacity.splice(i, 1);
+    }
+
+    // Round-robin, skipping numbers whose share is already at their remaining capacity.
     const buckets: RecipientInput[][] = targetSessions.map(() => []);
-    recipients.forEach((r, i) => { buckets[i % targetSessions.length].push(r); });
+    let cursor = 0;
+    let unplaced = 0;
+    for (const r of recipients) {
+        let placed = false;
+        for (let tries = 0; tries < targetSessions.length; tries++) {
+            const i = (cursor + tries) % targetSessions.length;
+            if (buckets[i].length < capacity[i].remaining) {
+                buckets[i].push(r);
+                cursor = (i + 1) % targetSessions.length;
+                placed = true;
+                break;
+            }
+        }
+        if (!placed) unplaced++;
+    }
+    if (unplaced > 0) {
+        const room = recipients.length - unplaced;
+        const detail = targetSessions.map((s, i) => `${s}: ${Number.isFinite(capacity[i].remaining) ? capacity[i].remaining : "no limit"}`).join(", ");
+        throw new Error(`The selected number${targetSessions.length > 1 ? "s" : ""} can send ${room} more message${room === 1 ? "" : "s"} today (${detail}), but this list has ${recipients.length} recipients. Send to at most ${room} now, add another connected number, or raise the limit in Bot Settings → Broadcast Safety.`);
+    }
 
     const started: LaunchResult["started"] = [];
     const invalid: string[] = [];

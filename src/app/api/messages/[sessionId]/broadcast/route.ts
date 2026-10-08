@@ -130,7 +130,7 @@ export async function POST(
     } catch (e: any) {
         const msg = e?.message || "Failed to start broadcast";
         const status = /not connected|Session not ready/i.test(msg) ? 503
-            : /No valid recipients|Too many recipients|Failed to fetch media|Daily limit|daily limit|Limit reached|paused on this number/i.test(msg) ? 400
+            : /No valid recipients|Too many recipients|Failed to fetch media|Daily limit|daily limit|Limit reached|paused on this number|can send \d+ more/i.test(msg) ? 400
             : 500;
         if (status === 500) console.error("Broadcast error", e);
         return NextResponse.json({ status: false, message: msg, error: msg }, { status });
