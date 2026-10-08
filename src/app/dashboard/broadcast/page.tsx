@@ -980,7 +980,7 @@ export default function BroadcastPage() {
                                     <div className="space-y-2">
                                         <Label>Message (Optional if media attached)</Label>
                                         <p className="text-[11px] text-muted-foreground">
-                                            <code className="bg-muted px-1 rounded">{"{name}"}</code> = the name from the Excel <em>Name</em> column (or a saved contact). Numbers pasted without names have no name, so write <code className="bg-muted px-1 rounded">{"{name|ji}"}</code> to fall back to &quot;ji&quot;. <code className="bg-muted px-1 rounded">{"{Hi|Hello|Namaste}"}</code> picks one at random per message. <em>Auto-vary wording</em> (toggle below the delay settings, on by default) adds a varied greeting and closing by itself.
+                                            <code className="bg-muted px-1 rounded">{"{name}"}</code> = the name from the Excel <em>Name</em> column (or a saved contact). Numbers pasted without names have no name, so write <code className="bg-muted px-1 rounded">{"{name|ji}"}</code> to fall back to &quot;ji&quot;. <code className="bg-muted px-1 rounded">{"{Hi|Hello|Namaste}"}</code> picks one at random per message. <em>Auto-vary wording</em> (below, on by default) adds a varied greeting and closing by itself.
                                         </p>
                                         <Textarea
                                             placeholder="Type your message or media caption here..."
@@ -989,6 +989,16 @@ export default function BroadcastPage() {
                                             onChange={e => setMessage(e.target.value)}
                                             disabled={loading}
                                         />
+                                        <div className={`flex items-start justify-between gap-3 rounded-lg border p-3 ${autoVary ? "border-primary/40 bg-primary/5" : ""}`}>
+                                            <div className="space-y-1">
+                                                <Label className="text-xs flex items-center gap-1.5"><Zap className="h-3.5 w-3.5" /> Auto-vary wording {autoVary && <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary text-[10px] font-semibold">ON</span>}</Label>
+                                                <p className="text-[11px] text-muted-foreground">No variables needed. Every message gets a random greeting on top and a random closing at the bottom, so no two copies are identical. With a name from Excel it says <em>Namaste Rahul 🙏</em>; without names it says <em>Namaste ji 🙏</em> / <em>Hello!</em> / <em>Hi there,</em> … Skipped when your text already starts with a greeting or ends with a thank-you.</p>
+                                                {autoVary && (
+                                                    <pre className="text-[11px] whitespace-pre-wrap rounded bg-muted p-2 text-muted-foreground">{`Namaste ji 🙏\n\n${message.trim() ? message.trim().split("\n")[0].slice(0, 60) + (message.trim().length > 60 || message.trim().includes("\n") ? "…" : "") : "(your message)"}\n\nDhanyawad 🙏`}</pre>
+                                                )}
+                                            </div>
+                                            <Switch checked={autoVary} onCheckedChange={setAutoVary} disabled={loading} />
+                                        </div>
                                     </div>
 
                                     <div className="space-y-2">
@@ -1126,13 +1136,6 @@ export default function BroadcastPage() {
                                                     <p className="text-[11px] text-muted-foreground">Send in shuffled order instead of list order.</p>
                                                 </div>
                                                 <Switch checked={shuffle} onCheckedChange={setShuffle} disabled={loading} />
-                                            </div>
-                                            <div className="flex items-center justify-between gap-3">
-                                                <div>
-                                                    <Label className="text-xs">Auto-vary wording</Label>
-                                                    <p className="text-[11px] text-muted-foreground">Adds a random greeting with the person&apos;s name (Namaste Rahul 🙏 / Hello Rahul! …) on top and a random closing (Dhanyawad 🙏 / Thank you! …) at the bottom, so no two messages are identical. Skipped when your text already starts with a greeting or ends with a thank-you.</p>
-                                                </div>
-                                                <Switch checked={autoVary} onCheckedChange={setAutoVary} disabled={loading} />
                                             </div>
                                         </div>
 
