@@ -39,7 +39,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         data: {
             name: d.name, body: d.body, mediaUrl: d.mediaUrl?.trim() || null, mediaType: d.mediaUrl?.trim() ? (d.mediaType || "image") : null,
             buttons: buttons.length ? (buttons as any) : null, footer: buttons.length ? (d.footer?.trim() || null) : null,
-            buttonMode: buttons.length ? (d.buttonMode || "interactive") : null
+            buttonMode: buttons.length ? (d.buttonMode === "interactive" ? "interactive" : "text") : null
         }
     });
     return NextResponse.json({ status: true, message: "Template updated", data });

@@ -204,6 +204,36 @@ export function hasPersonalization(template: string): boolean {
     return /\{[^{}]*\}/.test(template || "");
 }
 
+const AUTO_GREETINGS = ["Namaste", "Hello", "Hi", "Namaskar", "Hello ji", "Namaste ji", "Hi there"];
+const AUTO_GREETING_TAILS = ["!", ",", " 🙏", " 😊", "! 🙏", ","];
+const AUTO_CLOSINGS = ["Dhanyawad 🙏", "Thank you!", "Shukriya 🙏", "Thanks 😊", "Dhanyawad!", "Thank you 🙏", "🙏"];
+const GREETING_START = /^\s*(hi|hii|hello|helo|hey|namaste|namaskar|namaskaar|pranam|jai |dear|good (morning|afternoon|evening)|greetings|salaam|assalam|sat sri|radhe|hare)/i;
+const CLOSING_END = /(thank|thanks|dhanyawad|dhanyavaad|shukriya|regards|aabhar|🙏)\W*$/i;
+
+function pick<T>(list: T[]): T { return list[Math.floor(Math.random() * list.length)]; }
+
+/**
+ * Auto-vary: make every copy of a broadcast text a little different without the sender writing
+ * spintax — a random greeting line on top (with the recipient's name when known) unless the text
+ * already opens with one, and a random closing at the bottom unless it already ends with one.
+ * Identical texts to many people are one of WhatsApp's strongest spam signals; this gives each
+ * message a different first and last line, which is what the filter compares most.
+ */
+export function autoVaryText(text: string, vars: TemplateVars | null | undefined): string {
+    const body = (text || "").trim();
+    if (!body) return text;
+    const name = normalizeVars(vars).name || "";
+    const parts: string[] = [];
+    if (!GREETING_START.test(body)) {
+        // "Hello ji Rahul" reads wrong — the "ji" variants are for recipients without a name.
+        const greeting = name ? pick(AUTO_GREETINGS.filter(g => !/ ji$/.test(g))) : pick(AUTO_GREETINGS);
+        parts.push(`${greeting}${name ? ` ${name}` : ""}${pick(AUTO_GREETING_TAILS)}`);
+    }
+    parts.push(body);
+    if (!CLOSING_END.test(body)) parts.push(pick(AUTO_CLOSINGS));
+    return parts.join("\n\n");
+}
+
 function extractText(msg: WAMessage): string {
     const content = normalizeMessageContent(msg.message);
     return content?.conversation || content?.extendedTextMessage?.text || "";

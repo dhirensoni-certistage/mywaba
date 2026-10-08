@@ -1,3 +1,15 @@
+## [v1.7.2] - 2026-10-08
+
+### Added
+- **Auto-vary wording** (Broadcast page toggle, on by default; `autoVary: true` in the API and campaign payload): every message gets a random greeting line with the recipient's name on top (Namaste Rahul 🙏 / Hello Rahul! / Hi there, …) and a random closing at the bottom (Dhanyawad 🙏 / Thank you! …), so no two copies are identical without writing `{a|b}` spintax. Skipped when the text already opens with a greeting or ends with a thank-you; media without a caption is left alone. Retry keeps the setting.
+
+### Fixed
+- **`{name}` looked broken**: it only has a value from the Excel *Name* column or a saved contact, so numbers pasted as plain text came out without a name. The hint on the Broadcast page now says so and shows `{name|ji}` as the fallback form.
+- **Retry of a button broadcast switched to text**: the retry route read a missing `buttonMode` as interactive before and as text now; it now keeps whatever mode the original run used.
+- **Number logged out after ~40 messages of a button campaign**: interactive (native-flow) button messages carry the `bot biz_bot=1` / `biz/interactive` stanza nodes that make them render, which declares them as business-bot traffic. WhatsApp accepts every one (so the send never fails and the text fallback never triggers) and then force-unlinks a normal linked device that sends them in bulk (401 `device_removed`). **Text options is now the default** "Send as" mode on the Broadcast page, in templates and in the API (`buttonMode` omitted → `text`); interactive must be chosen explicitly and the page warns about the logout risk on big lists (no per-run cap). Guidance on the Broadcast page and in the Safety Guide updated.
+- **Multi-number rotation could silently drop part of the list**: the recipients were split evenly, so a number that had less of its daily limit left than its share (or was paused by the delivery monitor) had its run refused and that share was never sent — only a toast said so. The split now follows what each number can still send today (daily limit / warm-up cap minus the last 24 h); full or paused extra numbers are skipped and the others take their share. If the selected numbers together cannot take the whole list, nothing starts and the error says how many more can be sent today per number.
+- **Interactive messages never answered retry receipts**: they are sent through `relayMessage`, which bypassed the sent-message cache used by `getMessage`, so a recipient that asked for a re-send never got the message. `relayMessage` is now wrapped like `sendMessage`.
+
 ## [v1.7.1] - 2026-10-01
 
 ### Fixed

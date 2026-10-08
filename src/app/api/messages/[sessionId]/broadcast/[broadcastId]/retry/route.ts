@@ -73,10 +73,11 @@ export async function POST(
             simulateTyping: opts.simulateTyping,
             validateNumbers: opts.validateNumbers,
             shuffle: opts.shuffle,
+            autoVary: opts.autoVary === true,
             spreadHours: opts.spreadHours,
             buttons: opts.buttons,
             footer: opts.footer || undefined,
-            buttonMode: opts.buttonMode === "text" ? "text" : undefined,
+            buttonMode: opts.buttonMode === "interactive" ? "interactive" : "text",
             retryOf: log.id
         });
 

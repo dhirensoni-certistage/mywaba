@@ -159,7 +159,7 @@ export default function BroadcastPage() {
     const [extraSessions, setExtraSessions] = useState<string[]>([]);
     const [buttons, setButtons] = useState<ButtonDraft[]>([]);
     const [footer, setFooter] = useState("");
-    const [buttonMode, setButtonMode] = useState<"interactive" | "text">("interactive");
+    const [buttonMode, setButtonMode] = useState<"interactive" | "text">("text");
     const [limitDraft, setLimitDraft] = useState<string>("");
     const [savingLimit, setSavingLimit] = useState(false);
     const [check, setCheck] = useState<CheckState | null>(null);
@@ -178,6 +178,7 @@ export default function BroadcastPage() {
     const [progressMap, setProgressMap] = useState<Record<string, BroadcastProgress>>({});
     const [activeTab, setActiveTab] = useState<"new" | "history" | "guide" | "campaigns">("new");
     const [shuffle, setShuffle] = useState(true);
+    const [autoVary, setAutoVary] = useState(true);
     const [health, setHealth] = useState<BroadcastHealth | null>(null);
 
     // Templates, contact lists, scheduling
@@ -268,7 +269,7 @@ export default function BroadcastPage() {
         if (t.mediaType) setMediaType(t.mediaType);
         setButtons((t.buttons || []).map(b => ({ type: b.type, text: b.text, url: b.url || "", phone: b.phone || "" })));
         setFooter(t.footer || "");
-        setButtonMode(t.buttonMode === "text" ? "text" : "interactive");
+        setButtonMode(t.buttonMode === "interactive" ? "interactive" : "text");
         toast.success(`Template "${t.name}" applied`);
     };
 
@@ -377,7 +378,7 @@ export default function BroadcastPage() {
                     recipients: useList ? undefined : recipients,
                     payload: {
                         message, mediaUrl: mediaUrl.trim() || undefined, mediaType: mediaUrl.trim() ? (mediaType || "image") : undefined,
-                        delay: delay[0], batchSize, batchPauseMs: batchPauseSec * 1000, simulateTyping, validateNumbers, shuffle,
+                        delay: delay[0], batchSize, batchPauseMs: batchPauseSec * 1000, simulateTyping, validateNumbers, shuffle, autoVary,
                         spreadHours: spreadHours > 0 ? spreadHours : undefined, sessionIds: extraSessions.length > 0 ? extraSessions : undefined,
                         buttons: cleanButtons.length > 0 ? cleanButtons : undefined, footer: cleanButtons.length > 0 && footer.trim() ? footer.trim() : undefined,
                         buttonMode: cleanButtons.length > 0 ? buttonMode : undefined
@@ -681,6 +682,7 @@ export default function BroadcastPage() {
                     simulateTyping,
                     validateNumbers,
                     shuffle,
+                    autoVary,
                     spreadHours: spreadHours > 0 ? spreadHours : undefined,
                     sessionIds: extraSessions.length > 0 ? extraSessions : undefined,
                     buttons: cleanButtons.length > 0 ? cleanButtons : undefined,
@@ -978,7 +980,7 @@ export default function BroadcastPage() {
                                     <div className="space-y-2">
                                         <Label>Message (Optional if media attached)</Label>
                                         <p className="text-[11px] text-muted-foreground">
-                                            Use <code className="bg-muted px-1 rounded">{"{name}"}</code> for the contact&apos;s name and <code className="bg-muted px-1 rounded">{"{Hi|Hello|Namaste}"}</code> to vary wording — identical texts to many people are a spam signal.
+                                            <code className="bg-muted px-1 rounded">{"{name}"}</code> = the name from the Excel <em>Name</em> column (or a saved contact). Numbers pasted without names have no name, so write <code className="bg-muted px-1 rounded">{"{name|ji}"}</code> to fall back to &quot;ji&quot;. <code className="bg-muted px-1 rounded">{"{Hi|Hello|Namaste}"}</code> picks one at random per message. <em>Auto-vary wording</em> (below, on by default) adds a varied greeting and closing by itself.
                                         </p>
                                         <Textarea
                                             placeholder="Type your message or media caption here..."
@@ -987,6 +989,16 @@ export default function BroadcastPage() {
                                             onChange={e => setMessage(e.target.value)}
                                             disabled={loading}
                                         />
+                                        <div className={`flex items-start justify-between gap-3 rounded-lg border p-3 ${autoVary ? "border-primary/40 bg-primary/5" : ""}`}>
+                                            <div className="space-y-1">
+                                                <Label className="text-xs flex items-center gap-1.5"><Zap className="h-3.5 w-3.5" /> Auto-vary wording {autoVary && <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary text-[10px] font-semibold">ON</span>}</Label>
+                                                <p className="text-[11px] text-muted-foreground">No variables needed. Every message gets a random greeting on top and a random closing at the bottom, so no two copies are identical. With a name from Excel it says <em>Namaste Rahul 🙏</em>; without names it says <em>Namaste ji 🙏</em> / <em>Hello!</em> / <em>Hi there,</em> … Skipped when your text already starts with a greeting or ends with a thank-you.</p>
+                                                {autoVary && (
+                                                    <pre className="text-[11px] whitespace-pre-wrap rounded bg-muted p-2 text-muted-foreground">{`Namaste ji 🙏\n\n${message.trim() ? message.trim().split("\n")[0].slice(0, 60) + (message.trim().length > 60 || message.trim().includes("\n") ? "…" : "") : "(your message)"}\n\nDhanyawad 🙏`}</pre>
+                                                )}
+                                            </div>
+                                            <Switch checked={autoVary} onCheckedChange={setAutoVary} disabled={loading} />
+                                        </div>
                                     </div>
 
                                     <div className="space-y-2">
@@ -1035,7 +1047,7 @@ export default function BroadcastPage() {
                                                     <Select value={buttonMode} onValueChange={(v: string) => setButtonMode(v === "text" ? "text" : "interactive")} disabled={loading}>
                                                         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="interactive">Interactive buttons (BETA — Android mostly)</SelectItem>
+                                                            <SelectItem value="interactive">Interactive buttons (BETA — logout risk on big lists)</SelectItem>
                                                             <SelectItem value="text">Text options (shows on every phone)</SelectItem>
                                                         </SelectContent>
                                                     </Select>
@@ -1043,7 +1055,7 @@ export default function BroadcastPage() {
                                                 {buttonMode === "text" ? (
                                                     <pre className="text-[11px] whitespace-pre-wrap rounded bg-muted p-2 text-muted-foreground">{buttons.filter(b => b.text.trim()).map(b => b.type === "url" ? `🔗 ${b.text}: ${b.url || "https://…"}` : b.type === "call" ? `📞 ${b.text}: ${b.phone || "+91…"}` : `👉 Reply *${b.text}*`).join("\n")}{footer.trim() ? `\n_${footer.trim()}_` : ""}</pre>
                                                 ) : (
-                                                    <p className="text-[11px] text-amber-700 dark:text-amber-400">If WhatsApp rejects the interactive message, the rest of the run is sent with the buttons as text lines automatically. A message that is accepted but not displayed cannot be detected — that is why a test to your own phone matters.</p>
+                                                    <p className="text-[11px] text-amber-700 dark:text-amber-400"><strong>Logout risk.</strong> WhatsApp treats interactive messages as bot traffic and has logged a normal number out (401 device_removed) after about 40 of them — it accepts each one, so the run cannot detect it in time. Use this for tests and small lists; for a campaign choose <em>Text options</em>.</p>
                                                 )}
                                             </>
                                         )}
@@ -1217,7 +1229,7 @@ export default function BroadcastPage() {
                                             <li><strong className="text-foreground">Big list?</strong> Use <em>Spread evenly over hours</em> or add more connected numbers — do not raise one number&apos;s daily limit.</li>
                                             <li><strong className="text-foreground">Personalise.</strong> <code className="bg-muted px-1 rounded">{"{name|there}"}</code> and <code className="bg-muted px-1 rounded">{"{Hi|Hello}"}</code>; identical texts get flagged.</li>
                                             <li><strong className="text-foreground">Validate first.</strong> Start checks every number and shows what is not on WhatsApp — remove them, don&apos;t send to dead numbers.</li>
-                                            <li><strong className="text-foreground">Buttons are Beta.</strong> Interactive buttons show on most Android phones, often not on iPhone / Web. Send a test to your own phone first; if nothing shows up, choose <em>Send as → Text options</em>.</li>
+                                            <li><strong className="text-foreground">Buttons: use Text options for campaigns.</strong> Interactive buttons are for tests and small lists: WhatsApp treats them as bot messages and has logged a number out after about 40 of them. Text options show on every phone and carry no such risk.</li>
                                             <li><strong className="text-foreground">Something failed?</strong> History → Detail → <em>Retry failed</em> re-sends only the deliverable ones.</li>
                                             <li><strong className="text-foreground">Logged out mid-run?</strong> Stop for 24 hours, re-link, resume at half the volume. Alerts for this: Settings → Alerts.</li>
                                             <li><strong className="text-foreground">New or recently logged-out number?</strong> Turn on <em>Warm-up mode</em> in Bot Settings → Broadcast Safety: 20 → 50 → 100 → 150/day over 3 weeks.</li>
@@ -1683,7 +1695,7 @@ export default function BroadcastPage() {
                             </CardHeader>
                             <CardContent className="text-sm">
                                 <ul className="list-disc pl-5 space-y-1.5 text-muted-foreground">
-                                    <li><strong className="text-foreground">Buttons</strong> are officially supported only on the WhatsApp Business API. From a linked device, <em>Interactive buttons</em> render on most Android phones and often not on iPhone / Web — and a phone that does not support them shows <strong>nothing at all</strong>, not even the text. Always send one test to your own phone first. <em>Text options</em> writes the buttons as lines under the message (👉 Reply *Yes* · 🔗 Website: link · 📞 Call: number) and is displayed by every client; use it for anything important. If WhatsApp rejects an interactive message the run switches to text options by itself. Interactive messages show a small <strong>&quot;AI&quot;</strong> tag next to the time on the recipient&apos;s phone: WhatsApp labels every bot-style message this way and it cannot be switched off — if you do not want it, use Text options.</li>
+                                    <li><strong className="text-foreground">Buttons</strong> are officially supported only on the WhatsApp Business API. From a linked device, <em>Interactive buttons</em> render on most Android phones and often not on iPhone / Web — and a phone that does not support them shows <strong>nothing at all</strong>, not even the text. Always send one test to your own phone first. <em>Text options</em> writes the buttons as lines under the message (👉 Reply *Yes* · 🔗 Website: link · 📞 Call: number) and is displayed by every client; use it for every campaign. Keep interactive mode for tests and small lists: WhatsApp accepts each interactive message (so the run cannot notice a problem) and has unlinked a normal number after about 40 of them (401 device_removed). Interactive messages show a small <strong>&quot;AI&quot;</strong> tag next to the time on the recipient&apos;s phone: WhatsApp labels every bot-style message this way and it cannot be switched off — if you do not want it, use Text options.</li>
                                     <li><strong className="text-foreground">Retry failed</strong> (History → Detail) re-sends only recipients that failed for a temporary reason. Not-on-WhatsApp and opted-out numbers are never retried.</li>
                                     <li><strong className="text-foreground">Alerts</strong> (Settings → Alerts, superadmin): Telegram or email when a session is logged out / stopped, a broadcast has failures, or a number used 80% of its daily limit.</li>
                                     <li><strong className="text-foreground">Staff accounts</strong> can broadcast and chat on shared sessions but cannot change settings, sessions, webhooks or limits — ask the owner.</li>
