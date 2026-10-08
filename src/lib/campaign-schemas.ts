@@ -36,6 +36,7 @@ export const campaignPayloadSchema = z.object({
     simulateTyping: z.boolean().optional(),
     validateNumbers: z.boolean().optional(),
     shuffle: z.boolean().optional(),
+    autoVary: z.boolean().optional(),
     spreadHours: z.number().min(0).max(72).optional(),
     sessionIds: z.array(z.string()).optional(),
     buttons: z.array(buttonSchema).max(3).optional(),

@@ -4,7 +4,7 @@ import { waManager } from "./manager";
 import type { AnyMessageContent } from "@whiskeysockets/baileys";
 import {
     loadSafetyConfig, countSentLast24h, getSystemTimezone, currentHourInTz, isInQuietHours, formatHour,
-    loadContactsForJids, personalize, hasPersonalization, type SafetyConfig, type TemplateVars,
+    loadContactsForJids, personalize, hasPersonalization, autoVaryText, type SafetyConfig, type TemplateVars,
     effectiveDailyLimit, isBroadcastPaused, pauseBroadcasts, getEngagementStats, MONITOR, WARMUP_DAYS,
     type EngagementStats, type EffectiveLimit
 } from "./safety";
@@ -92,6 +92,12 @@ export interface BroadcastOptions {
      * `batchPauseMs`: the per-message gap becomes hours*3600/recipients (never below the minimum).
      */
     spreadHours?: number;
+    /**
+     * Auto-vary wording (default false in the API, on in the dashboard): a random greeting line
+     * with the recipient's name on top and a random closing at the bottom of every message, so no
+     * two copies are identical even without {a|b} spintax. Media without a caption is left alone.
+     */
+    autoVary?: boolean;
     /** Up to 3 interactive buttons (BETA — see interactive.ts). Validated with sanitizeButtons(). */
     buttons?: Array<{ type?: string; text: string; url?: string; phone?: string }> | BroadcastButton[];
     /** Optional footer line under the button message. */
@@ -392,6 +398,7 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
     const simulateTyping = opts.simulateTyping !== false;
     const validateNumbers = opts.validateNumbers !== false;
     const shuffle = opts.shuffle !== false;
+    const autoVary = opts.autoVary === true;
 
     // Number protection: daily budget check before anything is queued.
     const { dbSessionId, safety } = await loadSafetyConfig(sessionId);
@@ -429,7 +436,7 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
             mediaUrl: opts.mediaUrl || null,
             mediaType: opts.mediaUrl ? (opts.mediaType || "image") : null,
             options: {
-                batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours,
+                batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, autoVary,
                 buttons, footer: footer || null, buttonMode, retryOf: opts.retryOf || null
             } as any,
             status: "running",
@@ -449,7 +456,7 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
     emit({ status: "running", sent: 0, failed: 0, progress: 0, current: null, startedAt: log.startedAt.toISOString(), note: validateNumbers ? "Validating numbers…" : null });
 
     // Fire and forget — the HTTP request returns immediately.
-    runBroadcast({ broadcastId, sessionId, dbSessionId, jids, recipients, messageContent, template: opts.message || "", delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore: sentLast24h, buttons, footer, buttonMode, emit })
+    runBroadcast({ broadcastId, sessionId, dbSessionId, jids, recipients, messageContent, template: opts.message || "", delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, autoVary, safety, sentBefore: sentLast24h, buttons, footer, buttonMode, emit })
         .catch(e => logger.error("Broadcast", `${broadcastId} crashed`, e))
         .finally(() => {
             activeBroadcasts.delete(broadcastId);
@@ -474,6 +481,7 @@ interface RunArgs {
     simulateTyping: boolean;
     validateNumbers: boolean;
     shuffle: boolean;
+    autoVary: boolean;
     safety: SafetyConfig;
     /** Broadcast messages already sent in the trailing 24h when this run started. */
     sentBefore: number;
@@ -481,6 +489,14 @@ interface RunArgs {
     footer?: string;
     buttonMode: ButtonMode;
     emit: (p: Partial<BroadcastProgressPayload> & { status?: BroadcastStatus }) => void;
+}
+
+/** Auto-vary applied to the text or caption; media without a caption is returned unchanged. */
+function varyContent(content: AnyMessageContent, vars: TemplateVars): AnyMessageContent {
+    const c = content as unknown as Record<string, unknown>;
+    if (typeof c.text === "string" && c.text.trim()) return { ...c, text: autoVaryText(c.text, vars) } as unknown as AnyMessageContent;
+    if (typeof c.caption === "string" && c.caption.trim()) return { ...c, caption: autoVaryText(c.caption, vars) } as unknown as AnyMessageContent;
+    return content;
 }
 
 /** Personalised copy of the base content for one recipient (text or caption). */
@@ -494,7 +510,7 @@ function contentFor(base: AnyMessageContent, template: string, vars: TemplateVar
 }
 
 async function runBroadcast(args: RunArgs) {
-    const { broadcastId, sessionId, dbSessionId, jids, recipients, messageContent, template, delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, safety, sentBefore, buttons, footer, buttonMode, emit } = args;
+    const { broadcastId, sessionId, dbSessionId, jids, recipients, messageContent, template, delayMs, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, autoVary, safety, sentBefore, buttons, footer, buttonMode, emit } = args;
     const timezone = await getSystemTimezone();
     const varsByJid = new Map(recipients.map(r => [r.jid, r.vars]));
     let interactiveBroken = false;
@@ -701,7 +717,7 @@ async function runBroadcast(args: RunArgs) {
 
                 const contact = contacts.get(targetJid) || contacts.get(rowJid);
                 const vars: TemplateVars = { name: contact?.name ?? null, ...(varsByJid.get(rowJid) || {}) };
-                const personalised = contentFor(messageContent, template, vars);
+                const personalised = autoVary ? varyContent(contentFor(messageContent, template, vars), vars) : contentFor(messageContent, template, vars);
                 let sentMsg: any = null;
                 if (buttons.length > 0 && buttonMode === "interactive" && !interactiveBroken) {
                     try {

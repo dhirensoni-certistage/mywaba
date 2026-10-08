@@ -178,6 +178,7 @@ export default function BroadcastPage() {
     const [progressMap, setProgressMap] = useState<Record<string, BroadcastProgress>>({});
     const [activeTab, setActiveTab] = useState<"new" | "history" | "guide" | "campaigns">("new");
     const [shuffle, setShuffle] = useState(true);
+    const [autoVary, setAutoVary] = useState(true);
     const [health, setHealth] = useState<BroadcastHealth | null>(null);
 
     // Templates, contact lists, scheduling
@@ -377,7 +378,7 @@ export default function BroadcastPage() {
                     recipients: useList ? undefined : recipients,
                     payload: {
                         message, mediaUrl: mediaUrl.trim() || undefined, mediaType: mediaUrl.trim() ? (mediaType || "image") : undefined,
-                        delay: delay[0], batchSize, batchPauseMs: batchPauseSec * 1000, simulateTyping, validateNumbers, shuffle,
+                        delay: delay[0], batchSize, batchPauseMs: batchPauseSec * 1000, simulateTyping, validateNumbers, shuffle, autoVary,
                         spreadHours: spreadHours > 0 ? spreadHours : undefined, sessionIds: extraSessions.length > 0 ? extraSessions : undefined,
                         buttons: cleanButtons.length > 0 ? cleanButtons : undefined, footer: cleanButtons.length > 0 && footer.trim() ? footer.trim() : undefined,
                         buttonMode: cleanButtons.length > 0 ? buttonMode : undefined
@@ -681,6 +682,7 @@ export default function BroadcastPage() {
                     simulateTyping,
                     validateNumbers,
                     shuffle,
+                    autoVary,
                     spreadHours: spreadHours > 0 ? spreadHours : undefined,
                     sessionIds: extraSessions.length > 0 ? extraSessions : undefined,
                     buttons: cleanButtons.length > 0 ? cleanButtons : undefined,
@@ -978,7 +980,7 @@ export default function BroadcastPage() {
                                     <div className="space-y-2">
                                         <Label>Message (Optional if media attached)</Label>
                                         <p className="text-[11px] text-muted-foreground">
-                                            Use <code className="bg-muted px-1 rounded">{"{name}"}</code> for the contact&apos;s name and <code className="bg-muted px-1 rounded">{"{Hi|Hello|Namaste}"}</code> to vary wording — identical texts to many people are a spam signal.
+                                            <code className="bg-muted px-1 rounded">{"{name}"}</code> = the name from the Excel <em>Name</em> column (or a saved contact). Numbers pasted without names have no name, so write <code className="bg-muted px-1 rounded">{"{name|ji}"}</code> to fall back to &quot;ji&quot;. <code className="bg-muted px-1 rounded">{"{Hi|Hello|Namaste}"}</code> picks one at random per message. <em>Auto-vary wording</em> (toggle below the delay settings, on by default) adds a varied greeting and closing by itself.
                                         </p>
                                         <Textarea
                                             placeholder="Type your message or media caption here..."
@@ -1124,6 +1126,13 @@ export default function BroadcastPage() {
                                                     <p className="text-[11px] text-muted-foreground">Send in shuffled order instead of list order.</p>
                                                 </div>
                                                 <Switch checked={shuffle} onCheckedChange={setShuffle} disabled={loading} />
+                                            </div>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <Label className="text-xs">Auto-vary wording</Label>
+                                                    <p className="text-[11px] text-muted-foreground">Adds a random greeting with the person&apos;s name (Namaste Rahul 🙏 / Hello Rahul! …) on top and a random closing (Dhanyawad 🙏 / Thank you! …) at the bottom, so no two messages are identical. Skipped when your text already starts with a greeting or ends with a thank-you.</p>
+                                                </div>
+                                                <Switch checked={autoVary} onCheckedChange={setAutoVary} disabled={loading} />
                                             </div>
                                         </div>
 

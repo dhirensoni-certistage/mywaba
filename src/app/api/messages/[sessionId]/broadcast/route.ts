@@ -36,6 +36,8 @@ const broadcastBodySchema = z.object({
     simulateTyping: z.boolean().optional(),
     validateNumbers: z.boolean().optional(),
     shuffle: z.boolean().optional(),
+    /** Random greeting (with name) on top and closing at the bottom of every message, so no two copies are identical. */
+    autoVary: z.boolean().optional(),
     /** Spread the run evenly over N hours (overrides delay/batch settings). */
     spreadHours: z.number().min(0).max(72).optional(),
     /** Extra connected sessions the user can access; recipients are split round-robin across all of them. */
@@ -104,13 +106,13 @@ export async function POST(
             return NextResponse.json({ status: false, message: "Forbidden", error: "Forbidden" }, { status: 403 });
         }
 
-        const { recipients, message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, sessionIds, buttons, footer, buttonMode } = parseResult.data;
+        const { recipients, message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, autoVary, spreadHours, sessionIds, buttons, footer, buttonMode } = parseResult.data;
 
         // Multi-number rotation + per-number runs live in launchBroadcasts (shared with scheduled campaigns).
         const launched = await launchBroadcasts({
             userId: user.id, userRole: user.role, sessionId,
             recipients: recipients as RecipientInput[],
-            payload: { message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, spreadHours, buttons, footer, buttonMode, sessionIds }
+            payload: { message, mediaUrl, mediaType, delay, batchSize, batchPauseMs, simulateTyping, validateNumbers, shuffle, autoVary, spreadHours, buttons, footer, buttonMode, sessionIds }
         });
         const { started, invalid, rejectedSessions, failures } = launched;
 
