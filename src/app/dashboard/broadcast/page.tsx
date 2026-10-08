@@ -159,7 +159,7 @@ export default function BroadcastPage() {
     const [extraSessions, setExtraSessions] = useState<string[]>([]);
     const [buttons, setButtons] = useState<ButtonDraft[]>([]);
     const [footer, setFooter] = useState("");
-    const [buttonMode, setButtonMode] = useState<"interactive" | "text">("interactive");
+    const [buttonMode, setButtonMode] = useState<"interactive" | "text">("text");
     const [limitDraft, setLimitDraft] = useState<string>("");
     const [savingLimit, setSavingLimit] = useState(false);
     const [check, setCheck] = useState<CheckState | null>(null);
@@ -268,7 +268,7 @@ export default function BroadcastPage() {
         if (t.mediaType) setMediaType(t.mediaType);
         setButtons((t.buttons || []).map(b => ({ type: b.type, text: b.text, url: b.url || "", phone: b.phone || "" })));
         setFooter(t.footer || "");
-        setButtonMode(t.buttonMode === "text" ? "text" : "interactive");
+        setButtonMode(t.buttonMode === "interactive" ? "interactive" : "text");
         toast.success(`Template "${t.name}" applied`);
     };
 
@@ -1035,7 +1035,7 @@ export default function BroadcastPage() {
                                                     <Select value={buttonMode} onValueChange={(v: string) => setButtonMode(v === "text" ? "text" : "interactive")} disabled={loading}>
                                                         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="interactive">Interactive buttons (BETA — Android mostly)</SelectItem>
+                                                            <SelectItem value="interactive">Interactive buttons (BETA — max 10 recipients, logout risk)</SelectItem>
                                                             <SelectItem value="text">Text options (shows on every phone)</SelectItem>
                                                         </SelectContent>
                                                     </Select>
@@ -1043,7 +1043,7 @@ export default function BroadcastPage() {
                                                 {buttonMode === "text" ? (
                                                     <pre className="text-[11px] whitespace-pre-wrap rounded bg-muted p-2 text-muted-foreground">{buttons.filter(b => b.text.trim()).map(b => b.type === "url" ? `🔗 ${b.text}: ${b.url || "https://…"}` : b.type === "call" ? `📞 ${b.text}: ${b.phone || "+91…"}` : `👉 Reply *${b.text}*`).join("\n")}{footer.trim() ? `\n_${footer.trim()}_` : ""}</pre>
                                                 ) : (
-                                                    <p className="text-[11px] text-amber-700 dark:text-amber-400">If WhatsApp rejects the interactive message, the rest of the run is sent with the buttons as text lines automatically. A message that is accepted but not displayed cannot be detected — that is why a test to your own phone matters.</p>
+                                                    <p className="text-[11px] text-amber-700 dark:text-amber-400"><strong>Tests only (max 10 recipients per run).</strong> WhatsApp treats interactive messages as bot traffic and logs a normal number out (401 device_removed) after a few dozen of them — it accepts each one, so the run cannot detect it in time. For a campaign choose <em>Text options</em>.</p>
                                                 )}
                                             </>
                                         )}
@@ -1217,7 +1217,7 @@ export default function BroadcastPage() {
                                             <li><strong className="text-foreground">Big list?</strong> Use <em>Spread evenly over hours</em> or add more connected numbers — do not raise one number&apos;s daily limit.</li>
                                             <li><strong className="text-foreground">Personalise.</strong> <code className="bg-muted px-1 rounded">{"{name|there}"}</code> and <code className="bg-muted px-1 rounded">{"{Hi|Hello}"}</code>; identical texts get flagged.</li>
                                             <li><strong className="text-foreground">Validate first.</strong> Start checks every number and shows what is not on WhatsApp — remove them, don&apos;t send to dead numbers.</li>
-                                            <li><strong className="text-foreground">Buttons are Beta.</strong> Interactive buttons show on most Android phones, often not on iPhone / Web. Send a test to your own phone first; if nothing shows up, choose <em>Send as → Text options</em>.</li>
+                                            <li><strong className="text-foreground">Buttons: use Text options for campaigns.</strong> Interactive buttons are for tests only (max 10 recipients): WhatsApp treats them as bot messages and logs the number out after a few dozen. Text options show on every phone and carry no such risk.</li>
                                             <li><strong className="text-foreground">Something failed?</strong> History → Detail → <em>Retry failed</em> re-sends only the deliverable ones.</li>
                                             <li><strong className="text-foreground">Logged out mid-run?</strong> Stop for 24 hours, re-link, resume at half the volume. Alerts for this: Settings → Alerts.</li>
                                             <li><strong className="text-foreground">New or recently logged-out number?</strong> Turn on <em>Warm-up mode</em> in Bot Settings → Broadcast Safety: 20 → 50 → 100 → 150/day over 3 weeks.</li>
@@ -1683,7 +1683,7 @@ export default function BroadcastPage() {
                             </CardHeader>
                             <CardContent className="text-sm">
                                 <ul className="list-disc pl-5 space-y-1.5 text-muted-foreground">
-                                    <li><strong className="text-foreground">Buttons</strong> are officially supported only on the WhatsApp Business API. From a linked device, <em>Interactive buttons</em> render on most Android phones and often not on iPhone / Web — and a phone that does not support them shows <strong>nothing at all</strong>, not even the text. Always send one test to your own phone first. <em>Text options</em> writes the buttons as lines under the message (👉 Reply *Yes* · 🔗 Website: link · 📞 Call: number) and is displayed by every client; use it for anything important. If WhatsApp rejects an interactive message the run switches to text options by itself. Interactive messages show a small <strong>&quot;AI&quot;</strong> tag next to the time on the recipient&apos;s phone: WhatsApp labels every bot-style message this way and it cannot be switched off — if you do not want it, use Text options.</li>
+                                    <li><strong className="text-foreground">Buttons</strong> are officially supported only on the WhatsApp Business API. From a linked device, <em>Interactive buttons</em> render on most Android phones and often not on iPhone / Web — and a phone that does not support them shows <strong>nothing at all</strong>, not even the text. Always send one test to your own phone first. <em>Text options</em> writes the buttons as lines under the message (👉 Reply *Yes* · 🔗 Website: link · 📞 Call: number) and is displayed by every client; use it for every campaign. Interactive mode is limited to 10 recipients per run: WhatsApp accepts each interactive message (so the run cannot notice a problem) and then unlinks a normal number after a few dozen of them (401 device_removed). Interactive messages show a small <strong>&quot;AI&quot;</strong> tag next to the time on the recipient&apos;s phone: WhatsApp labels every bot-style message this way and it cannot be switched off — if you do not want it, use Text options.</li>
                                     <li><strong className="text-foreground">Retry failed</strong> (History → Detail) re-sends only recipients that failed for a temporary reason. Not-on-WhatsApp and opted-out numbers are never retried.</li>
                                     <li><strong className="text-foreground">Alerts</strong> (Settings → Alerts, superadmin): Telegram or email when a session is logged out / stopped, a broadcast has failures, or a number used 80% of its daily limit.</li>
                                     <li><strong className="text-foreground">Staff accounts</strong> can broadcast and chat on shared sessions but cannot change settings, sessions, webhooks or limits — ask the owner.</li>

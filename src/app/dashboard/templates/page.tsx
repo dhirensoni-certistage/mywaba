@@ -21,7 +21,7 @@ interface Template {
     id: string; name: string; body: string; mediaUrl: string | null; mediaType: string | null;
     buttons: TemplateButton[] | null; footer: string | null; buttonMode: "interactive" | "text" | null; usageCount: number; updatedAt: string;
 }
-const emptyDraft = { name: "", body: "", mediaUrl: "", mediaType: "image", buttons: [] as TemplateButton[], footer: "", buttonMode: "interactive" as "interactive" | "text" };
+const emptyDraft = { name: "", body: "", mediaUrl: "", mediaType: "image", buttons: [] as TemplateButton[], footer: "", buttonMode: "text" as "interactive" | "text" };
 
 export default function TemplatesPage() {
     const { sessionId } = useSession();
@@ -48,7 +48,7 @@ export default function TemplatesPage() {
     const startNew = () => { setEditing(null); setDraft(emptyDraft); setOpen(true); };
     const startEdit = (t: Template) => {
         setEditing(t);
-        setDraft({ name: t.name, body: t.body, mediaUrl: t.mediaUrl || "", mediaType: t.mediaType || "image", buttons: t.buttons || [], footer: t.footer || "", buttonMode: t.buttonMode || "interactive" });
+        setDraft({ name: t.name, body: t.body, mediaUrl: t.mediaUrl || "", mediaType: t.mediaType || "image", buttons: t.buttons || [], footer: t.footer || "", buttonMode: t.buttonMode === "interactive" ? "interactive" : "text" });
         setOpen(true);
     };
 
@@ -112,7 +112,7 @@ export default function TemplatesPage() {
                                         <span className="text-[10px] font-normal text-muted-foreground shrink-0">used {t.usageCount}×</span>
                                     </CardTitle>
                                     <CardDescription className="text-[11px]">
-                                        {t.mediaUrl ? `${t.mediaType || "media"} attached · ` : ""}{t.buttons?.length ? `${t.buttons.length} button(s) (${t.buttonMode || "interactive"}) · ` : ""}updated {new Date(t.updatedAt).toLocaleDateString()}
+                                        {t.mediaUrl ? `${t.mediaType || "media"} attached · ` : ""}{t.buttons?.length ? `${t.buttons.length} button(s) (${t.buttonMode === "interactive" ? "interactive" : "text"}) · ` : ""}updated {new Date(t.updatedAt).toLocaleDateString()}
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent className="flex-1 flex flex-col gap-3">
@@ -165,7 +165,7 @@ export default function TemplatesPage() {
                                         <Input className="h-8 text-xs" placeholder="Footer line (optional, max 60)" maxLength={60} value={draft.footer} onChange={e => setDraft(d => ({ ...d, footer: e.target.value }))} />
                                         <Select value={draft.buttonMode} onValueChange={(v: string) => setDraft(d => ({ ...d, buttonMode: v === "text" ? "text" : "interactive" }))}>
                                             <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                                            <SelectContent><SelectItem value="interactive">Interactive buttons (BETA)</SelectItem><SelectItem value="text">Text options (every phone)</SelectItem></SelectContent>
+                                            <SelectContent><SelectItem value="interactive">Interactive buttons (BETA — tests only, max 10 recipients)</SelectItem><SelectItem value="text">Text options (every phone)</SelectItem></SelectContent>
                                         </Select>
                                     </div>
                                 )}

@@ -1,3 +1,9 @@
+## [v1.7.2] - 2026-10-08
+
+### Fixed
+- **Number logged out after ~40 messages of a button campaign**: interactive (native-flow) button messages carry the `bot biz_bot=1` / `biz/interactive` stanza nodes that make them render, which declares them as business-bot traffic. WhatsApp accepts every one (so the send never fails and the text fallback never triggers) and then force-unlinks a normal linked device that sends them in bulk (401 `device_removed`). Interactive mode is now limited to **10 recipients per run** (`MAX_INTERACTIVE_RECIPIENTS`); a larger list is refused with a message pointing to Text options. **Text options is now the default** "Send as" mode on the Broadcast page, in templates and in the API (`buttonMode` omitted → `text`); interactive must be chosen explicitly. Guidance on the Broadcast page and in the Safety Guide updated.
+- **Interactive messages never answered retry receipts**: they are sent through `relayMessage`, which bypassed the sent-message cache used by `getMessage`, so a recipient that asked for a re-send never got the message. `relayMessage` is now wrapped like `sendMessage`.
+
 ## [v1.7.1] - 2026-10-01
 
 ### Fixed

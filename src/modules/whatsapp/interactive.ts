@@ -33,6 +33,18 @@ export type BroadcastButton =
 
 export const MAX_BUTTONS = 3;
 
+/**
+ * Hard cap on recipients per run for `buttonMode: "interactive"`.
+ *
+ * The stanza nodes that make the buttons render (`biz/interactive/native_flow`, `bot biz_bot=1`)
+ * declare the message as coming from a business bot. WhatsApp accepts every single one of them
+ * (so the send never fails and the text fallback never triggers), then force-unlinks a normal
+ * linked device that sends them in bulk: 401 `device_removed` after a few dozen messages, seen
+ * in production at ~40. Interactive mode is therefore limited to tests and tiny lists; campaigns
+ * use `buttonMode: "text"`, which goes through the ordinary text path.
+ */
+export const MAX_INTERACTIVE_RECIPIENTS = 10;
+
 export function sanitizeButtons(input: unknown): BroadcastButton[] {
     if (!Array.isArray(input)) return [];
     const out: BroadcastButton[] = [];

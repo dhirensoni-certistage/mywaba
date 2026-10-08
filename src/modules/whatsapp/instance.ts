@@ -197,6 +197,14 @@ export class WhatsAppInstance {
                 self.rememberSentMessage(result?.key, result?.message);
                 return result;
             } as any;
+            // Interactive (button) messages go out via relayMessage, not sendMessage — remember them
+            // too, or retry receipts for them stay unanswered and the message never arrives.
+            const originalRelayMessage = sock.relayMessage.bind(sock);
+            sock.relayMessage = async (jid: string, message: proto.IMessage, options: Parameters<WASocket["relayMessage"]>[2]) => {
+                const result = await originalRelayMessage(jid, message, options);
+                if (options?.messageId) self.rememberSentMessage({ id: options.messageId, remoteJid: jid, fromMe: true }, message);
+                return result;
+            };
 
             // Bind Store for DB Sync
             bindSessionStore(sock, this.sessionId, this.io);
