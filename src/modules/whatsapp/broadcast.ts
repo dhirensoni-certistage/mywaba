@@ -8,7 +8,7 @@ import {
     effectiveDailyLimit, isBroadcastPaused, pauseBroadcasts, getEngagementStats, MONITOR, WARMUP_DAYS,
     type EngagementStats, type EffectiveLimit
 } from "./safety";
-import { sendInteractiveMessage, appendButtonsAsText, sanitizeButtons, MAX_INTERACTIVE_RECIPIENTS, type BroadcastButton, type ButtonMode } from "./interactive";
+import { sendInteractiveMessage, appendButtonsAsText, sanitizeButtons, type BroadcastButton, type ButtonMode } from "./interactive";
 import { checkNumbers } from "./number-check";
 import { sendAlert } from "@/lib/alerts";
 
@@ -389,9 +389,6 @@ export async function startBroadcast(opts: BroadcastOptions): Promise<{ broadcas
     // Text is the default: interactive (native-flow) messages are flagged as bot traffic and get a
     // normal linked device unlinked (401 device_removed) after a few dozen — see interactive.ts.
     const buttonMode: ButtonMode = opts.buttonMode === "interactive" ? "interactive" : "text";
-    if (buttons.length > 0 && buttonMode === "interactive" && jids.length > MAX_INTERACTIVE_RECIPIENTS) {
-        throw new Error(`Interactive buttons are limited to ${MAX_INTERACTIVE_RECIPIENTS} recipients per run (this list has ${jids.length}): WhatsApp treats them as bot messages and logs a normal number out after a few dozen. Choose "Send as → Text options" for this campaign.`);
-    }
     const simulateTyping = opts.simulateTyping !== false;
     const validateNumbers = opts.validateNumbers !== false;
     const shuffle = opts.shuffle !== false;

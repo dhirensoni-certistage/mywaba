@@ -165,7 +165,7 @@ export default function TemplatesPage() {
                                         <Input className="h-8 text-xs" placeholder="Footer line (optional, max 60)" maxLength={60} value={draft.footer} onChange={e => setDraft(d => ({ ...d, footer: e.target.value }))} />
                                         <Select value={draft.buttonMode} onValueChange={(v: string) => setDraft(d => ({ ...d, buttonMode: v === "text" ? "text" : "interactive" }))}>
                                             <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                                            <SelectContent><SelectItem value="interactive">Interactive buttons (BETA — tests only, max 10 recipients)</SelectItem><SelectItem value="text">Text options (every phone)</SelectItem></SelectContent>
+                                            <SelectContent><SelectItem value="interactive">Interactive buttons (BETA — logout risk on big lists)</SelectItem><SelectItem value="text">Text options (every phone)</SelectItem></SelectContent>
                                         </Select>
                                     </div>
                                 )}
