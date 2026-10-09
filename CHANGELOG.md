@@ -1,7 +1,7 @@
 ## [v1.7.2] - 2026-10-08
 
 ### Added
-- **Auto-vary wording** (Broadcast page toggle, on by default; `autoVary: true` in the API and campaign payload): every message gets a random greeting line with the recipient's name on top (Namaste Rahul 🙏 / Hello Rahul! / Hi there, …) and a random closing at the bottom (Dhanyawad 🙏 / Thank you! …), so no two copies are identical without writing `{a|b}` spintax. Skipped when the text already opens with a greeting or ends with a thank-you; media without a caption is left alone. Retry keeps the setting.
+- **Auto-vary wording** (Broadcast page toggle, on by default; `autoVary: true` in the API and campaign payload): every message gets a random greeting line with the recipient's name on top (Namaste Rahul 🙏 / Hello Rahul! / Hi there, …) and a random closing at the bottom (Dhanyawad 🙏 / Thank you! …), so no two copies are identical without writing `{a|b}` spintax. When the text already opens with a greeting (Namaste…, Jai Mata Di…) or ends with a thank-you, that line is kept and gets a random emoji / "!" instead, so every copy still differs. Media without a caption is left alone. Retry keeps the setting.
 
 ### Fixed
 - **`{name}` looked broken**: it only has a value from the Excel *Name* column or a saved contact, so numbers pasted as plain text came out without a name. The hint on the Broadcast page now says so and shows `{name|ji}` as the fallback form.
