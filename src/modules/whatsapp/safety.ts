@@ -204,61 +204,52 @@ export function hasPersonalization(template: string): boolean {
     return /\{[^{}]*\}/.test(template || "");
 }
 
-const AUTO_GREETINGS = ["Namaste", "Hello", "Hi", "Namaskar", "Hello ji", "Namaste ji", "Hi there"];
-const AUTO_GREETING_TAILS = ["!", ",", " 🙏", " 😊", "! 🙏", ","];
-const AUTO_CLOSINGS = ["Dhanyawad 🙏", "Thank you!", "Shukriya 🙏", "Thanks 😊", "Dhanyawad!", "Thank you 🙏", "🙏"];
-/** Appended to a greeting / closing line the sender wrote themselves, so those copies differ too. */
-const AUTO_LINE_DECOR = [" 🙏", " 😊", " ✨", " 🌸", " 🪔", " 🌺", " 💐", "!"];
-const GREETING_START = /^\s*(hi|hii|hello|helo|hey|namaste|namaskar|namaskaar|pranam|jai |dear|good (morning|afternoon|evening)|greetings|salaam|assalam|sat sri|radhe|hare)/i;
-const CLOSING_END = /(thank|thanks|dhanyawad|dhanyavaad|shukriya|regards|aabhar|🙏)\W*$/i;
+const AUTO_GREETINGS = ["Namaste", "Namaskar", "Hello", "Hi", "Hii", "Hey", "Hello ji", "Namaste ji", "Namaskar ji", "Hi there", "Dear", "Good day", "Pranam", "Greetings"];
+const AUTO_GREETING_TAILS = ["!", ",", " 🙏", " 😊", "! 🙏", ", 🙏", " 🌸", " ✨", "!!", " 🙏🙏"];
+/** Second line of the opener (used most of the time) — generic, true for any broadcast. */
+const AUTO_INTROS = [
+    "Umeed hai aap theek honge.", "Aasha hai aap sab kushal mangal honge.", "Umeed hai aapka din accha ja raha hai.",
+    "Hope you are doing well.", "Hope this message finds you well.", "Trust you are doing great.",
+    "Aapke liye ek khaas update hai.", "Aapke liye ek chhoti si jaankari.", "Ek zaroori baat aapke saath share karni thi.",
+    "Aapke liye kuch khaas laaye hain.", "Ek update aapke liye.", "Aapko ye batate hue khushi ho rahi hai.",
+    "Bas ek minute ka samay chahiye.", "Ek chhota sa message aapke liye.", "Aapke saath ek baat share karni hai.",
+    "Sharing a quick update with you.", "A small update for you.", "Just a quick note for you.",
+    "Aap kaise hain? Ek update hai.", "Aapka din shubh ho.", "Aapke liye ek special sandesh.",
+    "Kya haal hain? Ek baat batani thi.", "Aapke liye ek acchi khabar hai.", "Hum aapke liye kuch khaas laaye hain.",
+    "Aapka swagat hai is update ke saath.", "Ek baar zaroor padhein.", "Thoda samay nikaal kar ye zaroor dekhein.",
+    "Aapke liye ye jaankari zaroori hai.", "Good news aapke liye.", "Here is something for you."
+];
+const AUTO_CLOSINGS = [
+    "Dhanyawad 🙏", "Thank you!", "Shukriya 🙏", "Thanks 😊", "Dhanyawad!", "Thank you 🙏", "🙏",
+    "Aapka din shubh ho 🌸", "Have a great day!", "Aapka dhanyawad 🙏", "Bahut bahut dhanyawad 🙏",
+    "Aapke jawab ka intezaar rahega.", "Koi sawaal ho to zaroor batayein.", "Reply karke batayein 😊",
+    "Aapka aabhar 🙏", "Many thanks!", "Thanks a lot 🙏", "Shubh din 🌼", "Milte hain! 😊",
+    "Aapka samay dene ke liye dhanyawad 🙏", "Thank you for your time!", "Sadar dhanyawad 🙏",
+    "Aapka apna, hamesha 🙏", "Khush rahiye 😊", "Take care! 🌸", "Dhanyawad, aapka din accha ho ✨"
+];
 
 function pick<T>(list: T[]): T { return list[Math.floor(Math.random() * list.length)]; }
 
-/** Add one random decoration to a line the sender wrote (never the same one twice in a row). */
-function decorateLine(line: string): string {
-    const trimmed = line.replace(/\s+$/, "");
-    // "Jai Mata Di 🙏!" reads wrong: after an emoji or punctuation only add an emoji.
-    const endsWithWord = /[\p{L}\p{N}]$/u.test(trimmed);
-    const options = AUTO_LINE_DECOR.filter(d => !trimmed.endsWith(d.trim()) && (endsWithWord || d !== "!"));
-    return trimmed + pick(options);
-}
-
 /**
- * Auto-vary: make every copy of a broadcast text a little different without the sender writing
- * spintax. Identical texts to many people are one of WhatsApp's strongest spam signals; this
- * gives each message a different first and last line, which is what the filter compares most.
+ * Auto-vary: make every copy of a broadcast text different without the sender writing spintax.
+ * Identical texts to many people are one of WhatsApp's strongest spam signals; the first and
+ * last lines are what the filter compares most, so every copy gets its own.
  *
- *  - No greeting at the top → a random greeting line (with the recipient's name when known).
- *    The sender's own greeting (Namaste…, Jai Mata Di…) stays, and gets a random emoji / "!" so
- *    that line still differs between copies.
- *  - No closing at the bottom → a random closing line. The sender's own closing (Dhanyawad 🙏…)
- *    stays and gets a random decoration the same way.
+ * Always adds (whatever the text already starts or ends with — the owner's choice):
+ *  - an opener on top: random greeting (with the recipient's name when known) + random tail,
+ *    followed most of the time by one of many random intro sentences;
+ *  - a random closing line at the bottom.
+ * Hundreds of combinations, so no two recipients get the same message.
  */
 export function autoVaryText(text: string, vars: TemplateVars | null | undefined): string {
     const body = (text || "").trim();
     if (!body) return text;
     const name = normalizeVars(vars).name || "";
-    const lines = body.split("\n");
-    const parts: string[] = [];
-
-    if (GREETING_START.test(body)) {
-        lines[0] = decorateLine(lines[0]);
-    } else {
-        // "Hello ji Rahul" reads wrong — the "ji" variants are for recipients without a name.
-        const greeting = name ? pick(AUTO_GREETINGS.filter(g => !/ ji$/.test(g))) : pick(AUTO_GREETINGS);
-        parts.push(`${greeting}${name ? ` ${name}` : ""}${pick(AUTO_GREETING_TAILS)}`);
-    }
-
-    let closing: string | null = null;
-    if (CLOSING_END.test(body)) {
-        lines[lines.length - 1] = decorateLine(lines[lines.length - 1]);
-    } else {
-        closing = pick(AUTO_CLOSINGS);
-    }
-
-    parts.push(lines.join("\n"));
-    if (closing) parts.push(closing);
-    return parts.join("\n\n");
+    // "Hello ji Rahul" reads wrong — the "ji" variants are for recipients without a name.
+    const greeting = name ? pick(AUTO_GREETINGS.filter(g => !/ ji$/.test(g))) : pick(AUTO_GREETINGS.filter(g => g !== "Dear"));
+    let opener = `${greeting}${name ? ` ${name}` : ""}${pick(AUTO_GREETING_TAILS)}`;
+    if (Math.random() < 0.8) opener += `\n${pick(AUTO_INTROS)}`;
+    return [opener, body, pick(AUTO_CLOSINGS)].join("\n\n");
 }
 
 function extractText(msg: WAMessage): string {
